@@ -2,7 +2,7 @@ export const type = "w3du_local";
 export const label = "W3DU (local gateway)";
 
 export const DEFAULT_W3DU_LOCAL_MODEL = "gemma4:26b";
-export const DEFAULT_W3DU_BASE_URL = "http://127.0.0.1:3000/v1";
+export const DEFAULT_W3DU_BASE_URL = "https://llm.w3du.com/v1";
 
 export const models: Array<{ id: string; label: string }> = [
   { id: DEFAULT_W3DU_LOCAL_MODEL, label: DEFAULT_W3DU_LOCAL_MODEL },
@@ -24,7 +24,7 @@ Don't use when:
 - You need webhook-style external invocation (use openclaw_gateway or http).
 
 Core fields:
-- baseUrl (string, optional): OpenAI-compatible endpoint root, default http://127.0.0.1:3000/v1
+- baseUrl (string, optional): OpenAI-compatible endpoint root, default https://llm.w3du.com/v1
 - apiKey (string, optional): Bearer token for the gateway. Falls back to env W3DU_GATEWAY_API_KEY then the run's PAPERCLIP_API_KEY.
 - model (string, required): model id known to the gateway (e.g. "gemma4:26b").
 - cwd (string, optional): workspace cwd override; defaults to paperclipWorkspace.cwd.
