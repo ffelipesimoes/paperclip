@@ -164,10 +164,12 @@ describe("execute — tool loop", () => {
 
 describe("execute — hard stop", () => {
   it("returns errorMessage when maxToolTurns is exhausted without a stop", async () => {
-    const fetchMock = vi.fn(async () =>
-      new Response(
+    let turn = 0;
+    const fetchMock = vi.fn(async () => {
+      turn += 1;
+      return new Response(
         JSON.stringify({
-          id: "chat-loop",
+          id: `chat-loop-${turn}`,
           model: "gemma4:26b",
           choices: [
             {
@@ -177,9 +179,55 @@ describe("execute — hard stop", () => {
                 content: null,
                 tool_calls: [
                   {
-                    id: "call_loop",
+                    id: `call_${turn}`,
                     type: "function",
-                    function: { name: "bash", arguments: JSON.stringify({ command: "true", description: "noop" }) }
+                    function: {
+                      name: "bash",
+                      // Varying command per turn so cycle detection does NOT trigger;
+                      // we want the maxToolTurns guard to be what aborts.
+                      arguments: JSON.stringify({ command: `echo turn-${turn}`, description: "noop" })
+                    }
+                  }
+                ]
+              },
+              finish_reason: "tool_calls"
+            }
+          ],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const ctx = buildContext({
+      context: { paperclipWorkspace: { cwd: workdir } },
+      config: { model: "gemma4:26b", baseUrl: "http://127.0.0.1:3000/v1", maxToolTurns: 2, timeoutSec: 30 }
+    });
+    const result = await execute(ctx);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.errorMessage).toContain("without a final text response");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("aborts on identical repeated tool_call (defense in depth)", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          id: "chat-same",
+          model: "gemma4:26b",
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: "assistant",
+                content: null,
+                tool_calls: [
+                  {
+                    id: "call_same",
+                    type: "function",
+                    function: { name: "bash", arguments: JSON.stringify({ command: "ls", description: "list" }) }
                   }
                 ]
               },
@@ -195,13 +243,74 @@ describe("execute — hard stop", () => {
 
     const ctx = buildContext({
       context: { paperclipWorkspace: { cwd: workdir } },
-      config: { model: "gemma4:26b", baseUrl: "http://127.0.0.1:3000/v1", maxToolTurns: 2, timeoutSec: 30 }
+      config: { model: "gemma4:26b", baseUrl: "http://127.0.0.1:3000/v1", maxToolTurns: 10 }
     });
     const result = await execute(ctx);
 
     expect(result.exitCode).toBe(1);
-    expect(result.errorMessage).toContain("without a final text response");
+    expect(result.errorMessage).toContain("identical tool call repeated");
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("truncates parallel tool_calls to the first one", async () => {
+    const fetchMock = vi.fn();
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: "chat-parallel",
+          model: "gemma4:26b",
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "Plan: A",
+                tool_calls: [
+                  { id: "c1", type: "function", function: { name: "bash", arguments: JSON.stringify({ command: "cat a", description: "read a" }) } },
+                  { id: "c2", type: "function", function: { name: "bash", arguments: JSON.stringify({ command: "ls", description: "list" }) } },
+                  { id: "c3", type: "function", function: { name: "bash", arguments: JSON.stringify({ command: "pwd", description: "where" }) } }
+                ]
+              },
+              finish_reason: "tool_calls"
+            }
+          ],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: "chat-done",
+          model: "gemma4:26b",
+          choices: [
+            {
+              index: 0,
+              message: { role: "assistant", content: "Done." },
+              finish_reason: "stop"
+            }
+          ],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const ctx = buildContext({ context: { paperclipWorkspace: { cwd: workdir } } });
+    const result = await execute(ctx);
+
+    expect(result.exitCode).toBe(0);
+    expect((result.resultJson as any)?.discardedParallelToolCalls).toBe(2);
+
+    const secondInit = (fetchMock.mock.calls[1] as unknown[] | undefined)?.[1] as
+      | { body: string }
+      | undefined;
+    const secondBody = JSON.parse(secondInit?.body ?? "{}");
+    const toolMessages = secondBody.messages.filter((m: { role: string }) => m.role === "tool");
+    expect(toolMessages).toHaveLength(1);
+    expect(toolMessages[0].tool_call_id).toBe("c1");
   });
 });
 

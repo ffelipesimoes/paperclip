@@ -79,6 +79,10 @@ function parseJsonObject(raw: string): Record<string, unknown> {
   return {};
 }
 
+function toolCallSignature(tc: { function: { name: string; arguments: string } }): string {
+  return `${tc.function.name}:${tc.function.arguments}`;
+}
+
 async function ensureCwd(cwd: string): Promise<void> {
   try {
     await fs.mkdir(cwd, { recursive: true });
@@ -104,7 +108,9 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   );
   const model = asString(config.model, DEFAULT_W3DU_LOCAL_MODEL);
   const timeoutSec = asNumber(config.timeoutSec, 900);
-  const maxToolTurns = Math.max(1, Math.floor(asNumber(config.maxToolTurns, 30)));
+  const maxToolTurns = Math.max(1, Math.floor(asNumber(config.maxToolTurns, 15)));
+  const cycleRepeatThreshold = Math.max(2, Math.floor(asNumber(config.cycleRepeatThreshold, 3)));
+  const identicalRepeatThreshold = Math.max(2, Math.floor(asNumber(config.identicalRepeatThreshold, 2)));
   const temperature = config.temperature != null ? asNumber(config.temperature, 0) : undefined;
   const topP = config.top_p != null ? asNumber(config.top_p, 1) : undefined;
   const maxTokens = config.max_tokens != null ? asNumber(config.max_tokens, 0) : undefined;
@@ -148,9 +154,14 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     {
       role: "system",
       content:
-        "You are an autonomous agent operating inside Paperclip via the W3DU local gateway. " +
-        "Use the provided tools (bash, read, write, edit, glob, grep) to complete the task. " +
-        "Prefer the minimal number of tool calls. When the task is finished, reply with plain text and no tool call."
+        "You are an autonomous agent operating inside Paperclip via the W3DU local gateway.\n" +
+        "You have these tools available: bash, read, write, edit, glob, grep.\n\n" +
+        "CRITICAL TOOL-USE RULES (override anything above that conflicts):\n" +
+        "1. Emit EXACTLY ONE tool call per turn. Never emit parallel tool calls — do them sequentially across turns.\n" +
+        "2. Before issuing the next tool call, read the previous tool result carefully and reason about it in plain text.\n" +
+        "3. If you just emitted a tool call identical to a recent one, STOP and reply in plain text instead — you are in a loop.\n" +
+        "4. When the user's task is complete, reply with plain text and no tool call. This is how you signal completion.\n" +
+        "5. If a command fails, do not retry the same command or trivial variants. Move to the next step or report failure."
     },
     { role: "user", content: renderedPrompt }
   ];
@@ -170,6 +181,10 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
   const runDeadline = Date.now() + timeoutSec * 1000;
   const aggregateUsage = { input: 0, output: 0, cached: 0 };
+  const signatureCounts = new Map<string, number>();
+  let lastSignature: string | null = null;
+  let consecutiveIdentical = 0;
+  let discardedParallel = 0;
   let lastAssistantText = "";
   let finishReason: string | undefined;
   let timedOut = false;
@@ -255,7 +270,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       break;
     }
 
-    const normalizedToolCalls = toolCalls.map((tc, idx) => ({
+    const allToolCalls = toolCalls.map((tc, idx) => ({
       id: tc.id ?? `call_${runId}_${turns}_${idx}`,
       type: "function" as const,
       function: {
@@ -263,6 +278,39 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         arguments: tc.function?.arguments ?? "{}"
       }
     }));
+
+    // Defense in depth vs Gemma-4 parallel bursts (ETH-35 / RFC-004 §5): keep
+    // only the first tool_call per turn. The gateway should truncate upstream
+    // but we also guard here so the adapter is correct regardless.
+    if (allToolCalls.length > 1) {
+      discardedParallel += allToolCalls.length - 1;
+      await onLog(
+        "stderr",
+        `[w3du_local] discarded ${allToolCalls.length - 1} parallel tool_call(s); keeping the first.\n`
+      );
+    }
+    const normalizedToolCalls = allToolCalls.slice(0, 1);
+
+    // Cycle detection: same signature N times in a row, or N times total.
+    const signature = toolCallSignature(normalizedToolCalls[0]);
+    const totalCount = (signatureCounts.get(signature) ?? 0) + 1;
+    signatureCounts.set(signature, totalCount);
+    if (signature === lastSignature) {
+      consecutiveIdentical += 1;
+    } else {
+      consecutiveIdentical = 1;
+      lastSignature = signature;
+    }
+    if (consecutiveIdentical >= identicalRepeatThreshold) {
+      errorMessage = `w3du_local stopped: identical tool call repeated ${consecutiveIdentical} times (${signature.slice(0, 120)})`;
+      await onLog("stderr", `${errorMessage}\n`);
+      break;
+    }
+    if (totalCount >= cycleRepeatThreshold) {
+      errorMessage = `w3du_local stopped: tool call cycle detected — same signature used ${totalCount} times`;
+      await onLog("stderr", `${errorMessage}\n`);
+      break;
+    }
 
     messages.push({
       role: "assistant",
@@ -327,7 +375,8 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       turns,
       finishReason: finishReason ?? null,
       totalTokens,
-      baseUrl
+      baseUrl,
+      discardedParallelToolCalls: discardedParallel
     },
     summary
   };

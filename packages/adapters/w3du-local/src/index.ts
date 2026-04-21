@@ -29,7 +29,9 @@ Core fields:
 - model (string, required): model id known to the gateway (e.g. "gemma4:26b").
 - cwd (string, optional): workspace cwd override; defaults to paperclipWorkspace.cwd.
 - timeoutSec (number, optional): hard timeout per run (default 900).
-- maxToolTurns (number, optional): cap on assistant→tool→assistant hops per run (default 30).
+- maxToolTurns (number, optional): cap on assistant→tool→assistant hops per run (default 15).
+- cycleRepeatThreshold (number, optional): abort when the same tool_call signature has been issued N times in this run (default 3).
+- identicalRepeatThreshold (number, optional): abort when the same tool_call signature appears N times back-to-back (default 2).
 - temperature (number, optional): sampling temperature.
 - top_p (number, optional): sampling top_p.
 - max_tokens (number, optional): per-response cap.
@@ -40,6 +42,8 @@ Tool loop:
 - The adapter speaks OpenAI Chat Completions directly to the gateway.
 - Tool calls from the model are executed in-process: bash, read, write, edit, glob, grep.
 - Each result is appended as a role:"tool" message and the conversation is re-submitted until the model returns finish_reason:"stop" or the turn cap is hit.
+- Parallel tool_calls emitted in a single turn are truncated to the first one (defense in depth vs the Gemma-4 parallel-burst failure mode — see RFC-004).
+- Local cycle detection aborts the run when the same tool_call signature is emitted back-to-back or repeated N times total, even if the gateway's doom-loop-detector is disabled.
 - Completion signals from the model override hard-stop when forced-stop logic at the gateway (RFC-006) is engaged.
 
 Notes:
