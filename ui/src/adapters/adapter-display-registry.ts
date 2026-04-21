@@ -11,6 +11,7 @@ import {
   Code,
   Gem,
   MousePointer2,
+  Server,
   Sparkles,
   Terminal,
   Cpu,
@@ -95,6 +96,12 @@ const adapterDisplayMap: Record<string, AdapterDisplayInfo> = {
     icon: Bot,
     comingSoon: true,
     disabledLabel: "Configure OpenClaw within the App",
+  },
+  w3du_local: {
+    label: "W3DU",
+    description: "Local W3DU gateway (OpenAI-compatible, in-process tools)",
+    icon: Server,
+    recommended: true,
   },
   process: {
     label: "Process",

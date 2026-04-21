@@ -80,6 +80,16 @@ import {
   agentConfigurationDoc as hermesAgentConfigurationDoc,
   models as hermesModels,
 } from "hermes-paperclip-adapter";
+import {
+  execute as w3duExecute,
+  testEnvironment as w3duTestEnvironment,
+  sessionCodec as w3duSessionCodec,
+  listW3duModels,
+} from "@paperclipai/adapter-w3du-local/server";
+import {
+  agentConfigurationDoc as w3duAgentConfigurationDoc,
+  models as w3duModels,
+} from "@paperclipai/adapter-w3du-local";
 import { BUILTIN_ADAPTER_TYPES } from "./builtin-adapter-types.js";
 import { buildExternalAdapters } from "./plugin-loader.js";
 import { getDisabledAdapterTypes } from "../services/adapter-plugin-store.js";
@@ -216,6 +226,20 @@ const hermesLocalAdapter: ServerAdapterModule = {
   detectModel: () => detectModelFromHermes(),
 };
 
+const w3duLocalAdapter: ServerAdapterModule = {
+  type: "w3du_local",
+  execute: w3duExecute,
+  testEnvironment: w3duTestEnvironment,
+  sessionCodec: w3duSessionCodec,
+  sessionManagement: getAdapterSessionManagement("w3du_local") ?? undefined,
+  models: w3duModels,
+  listModels: () => listW3duModels(),
+  supportsLocalAgentJwt: true,
+  supportsInstructionsBundle: false,
+  requiresMaterializedRuntimeSkills: false,
+  agentConfigurationDoc: w3duAgentConfigurationDoc,
+};
+
 const adaptersByType = new Map<string, ServerAdapterModule>();
 
 // For builtin types that are overridden by an external adapter, we keep the
@@ -237,6 +261,7 @@ function registerBuiltInAdapters() {
     geminiLocalAdapter,
     openclawGatewayAdapter,
     hermesLocalAdapter,
+    w3duLocalAdapter,
     processAdapter,
     httpAdapter,
   ]) {
