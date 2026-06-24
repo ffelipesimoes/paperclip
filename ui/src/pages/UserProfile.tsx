@@ -7,13 +7,14 @@ import { userProfilesApi } from "../api/userProfiles";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { EmptyState } from "../components/EmptyState";
 import { PageSkeleton } from "../components/PageSkeleton";
-import { StatusBadge } from "../components/StatusBadge";
+import { IssueStatusBadge } from "../components/StatusBadge";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
 import { useCompany } from "../context/CompanyContext";
 import { queryKeys } from "../lib/queryKeys";
 import {
   formatCents,
   formatDate,
+  formatNumber,
   formatShortDate,
   formatTokens,
   issueUrl,
@@ -59,10 +60,10 @@ function WindowColumn({ stats }: { stats: UserProfileWindowStats }) {
       </div>
 
       <div className="grid grid-cols-2 gap-x-5 gap-y-3">
-        <Metric value={String(stats.touchedIssues)} label="Touched" />
-        <Metric value={String(stats.completedIssues)} label="Completed" />
-        <Metric value={String(stats.commentCount)} label="Comments" />
-        <Metric value={String(stats.activityCount)} label="Actions" />
+        <Metric value={formatNumber(stats.touchedIssues)} label="Touched" />
+        <Metric value={formatNumber(stats.completedIssues)} label="Completed" />
+        <Metric value={formatNumber(stats.commentCount)} label="Comments" />
+        <Metric value={formatNumber(stats.activityCount)} label="Actions" />
       </div>
 
       <div className="grid grid-cols-2 gap-x-5 gap-y-1.5 pt-3 text-xs tabular-nums text-muted-foreground">
@@ -71,9 +72,9 @@ function WindowColumn({ stats }: { stats: UserProfileWindowStats }) {
         <span>Spend</span>
         <span className="text-right text-foreground">{formatCents(stats.costCents)}</span>
         <span>Created</span>
-        <span className="text-right text-foreground">{stats.createdIssues}</span>
+        <span className="text-right text-foreground">{formatNumber(stats.createdIssues)}</span>
         <span>Open</span>
-        <span className="text-right text-foreground">{stats.assignedOpenIssues}</span>
+        <span className="text-right text-foreground">{formatNumber(stats.assignedOpenIssues)}</span>
       </div>
     </div>
   );
@@ -218,7 +219,7 @@ export function UserProfile() {
       (data?.topAgents ?? []).map((row) => ({
         key: row.agentId ?? "unknown",
         label: row.agentName ?? (row.agentId ? row.agentId.slice(0, 8) : "unknown"),
-        sublabel: "Issue-linked usage",
+        sublabel: "Task-linked usage",
         costCents: row.costCents,
         inputTokens: row.inputTokens,
         cachedInputTokens: row.cachedInputTokens,
@@ -283,9 +284,9 @@ export function UserProfile() {
 
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
           <HeroStat label="All-time tokens" value={formatTokens(allTimeTokens)} hint={formatCents(allTime?.costCents ?? 0) + " spent"} />
-          <HeroStat label="Completed" value={String(allTime?.completedIssues ?? 0)} hint={allTime ? `${completionRate(allTime)} rate` : undefined} />
-          <HeroStat label="Open assigned" value={String(allTime?.assignedOpenIssues ?? 0)} hint={`${allTime?.createdIssues ?? 0} created`} />
-          <HeroStat label="7-day actions" value={String(last7?.activityCount ?? 0)} hint={`${last7?.commentCount ?? 0} comments`} />
+          <HeroStat label="Completed" value={formatNumber(allTime?.completedIssues ?? 0)} hint={allTime ? `${completionRate(allTime)} rate` : undefined} />
+          <HeroStat label="Open assigned" value={formatNumber(allTime?.assignedOpenIssues ?? 0)} hint={`${formatNumber(allTime?.createdIssues ?? 0)} created`} />
+          <HeroStat label="7-day actions" value={formatNumber(last7?.activityCount ?? 0)} hint={`${formatNumber(last7?.commentCount ?? 0)} comments`} />
         </div>
       </section>
 
@@ -314,7 +315,7 @@ export function UserProfile() {
                     <span className="font-mono text-xs text-muted-foreground">{issue.identifier ?? issue.id.slice(0, 8)}</span>
                     <span className="truncate text-sm">{issue.title}</span>
                     <span className="flex items-center gap-3 sm:justify-end">
-                      <StatusBadge status={issue.status} />
+                      <IssueStatusBadge status={issue.status} />
                       <span className="text-xs tabular-nums text-muted-foreground">{relativeTime(issue.updatedAt)}</span>
                     </span>
                   </Link>

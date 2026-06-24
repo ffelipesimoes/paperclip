@@ -124,7 +124,7 @@ describe("ProjectWorkspaceSummaryCard", () => {
     expect(container.textContent).toContain("Branch");
     expect(container.textContent).toContain("Path");
     expect(container.textContent).toContain("Service");
-    expect(container.textContent).toContain("Linked issues");
+    expect(container.textContent).toContain("Linked tasks");
     expect(container.textContent).toContain("Start services");
     expect(container.textContent).toContain("Close workspace");
     expect(container.textContent).toContain("+1 more");
@@ -254,7 +254,6 @@ describe("ProjectWorkspaceSummaryCard", () => {
       root.unmount();
     });
   });
-
   it("colors live service urls green", () => {
     const root = createRoot(container);
 
