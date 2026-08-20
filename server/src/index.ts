@@ -936,8 +936,52 @@ export async function startServer(): Promise<StartedServer> {
       await Promise.allSettled([...heartbeatSchedulerInFlight]);
     }
   };
-  const startHeartbeatSchedulerInterval = (callback: () => void) => {
-    heartbeatSchedulerInterval = setInterval(callback, config.heartbeatSchedulerIntervalMs);
+  // Reentrancy guard for the scheduler tick itself (distinct from
+  // heartbeatSchedulerInFlight above, which tracks individual jobs a tick
+  // has started so shutdown can drain them). Without this, a tick whose
+  // chained jobs are still running when the next `setInterval` fires simply
+  // starts a second overlapping round on top of the first — under a DB or
+  // network slowdown (a hung query, a hung `git fetch`, ...) that repeats
+  // every interval, piling up more and more concurrent, never-finishing work
+  // instead of backing off. A callback that returns a Promise is tracked
+  // until it settles; a callback that returns nothing (the lighter
+  // heartbeat-disabled branch below) is considered done as soon as it
+  // returns, matching its previous fire-and-forget behavior.
+  let heartbeatSchedulerTickInFlight = false;
+  let heartbeatSchedulerTickStartedAt: number | null = null;
+  const startHeartbeatSchedulerInterval = (callback: () => void | Promise<unknown>) => {
+    const guardedTick = () => {
+      if (heartbeatSchedulerTickInFlight) {
+        const elapsedMs = heartbeatSchedulerTickStartedAt !== null
+          ? Date.now() - heartbeatSchedulerTickStartedAt
+          : 0;
+        logger.warn(
+          { elapsedMs },
+          `heartbeat scheduler tick skipped — previous tick still running (${elapsedMs}ms so far)`,
+        );
+        return;
+      }
+      heartbeatSchedulerTickInFlight = true;
+      heartbeatSchedulerTickStartedAt = Date.now();
+      const clearTickInFlight = () => {
+        heartbeatSchedulerTickInFlight = false;
+        heartbeatSchedulerTickStartedAt = null;
+      };
+      let result: void | Promise<unknown>;
+      try {
+        result = callback();
+      } catch (err) {
+        clearTickInFlight();
+        logger.error({ err }, "heartbeat scheduler tick threw synchronously");
+        return;
+      }
+      if (result && typeof (result as Promise<unknown>).then === "function") {
+        void (result as Promise<unknown>).then(clearTickInFlight, clearTickInFlight);
+      } else {
+        clearTickInFlight();
+      }
+    };
+    heartbeatSchedulerInterval = setInterval(guardedTick, config.heartbeatSchedulerIntervalMs);
     heartbeatSchedulerInterval?.unref?.();
   };
   const externalObjects = externalObjectService(db as any, {
@@ -1151,8 +1195,11 @@ export async function startServer(): Promise<StartedServer> {
     startHeartbeatSchedulerInterval(() => {
       // Track the outer async callback as well as the work it starts. Shutdown
       // can then wait through an already-running suppression check before it
-      // captures the authoritative set of running heartbeat rows.
-      trackHeartbeatSchedulerWork((async () => {
+      // captures the authoritative set of running heartbeat rows. The same
+      // promise is also returned below so startHeartbeatSchedulerInterval's
+      // reentrancy guard knows when this whole tick (not just an individual
+      // job within it) has finished.
+      const tick = (async () => {
         if (heartbeatSchedulerStopped) return;
         trackHeartbeatSchedulerWork(decisionExecutor.sweepExpired().catch((err: unknown) => {
           logger.error({ err }, "decision expiry sweep failed");
@@ -1321,7 +1368,9 @@ export async function startServer(): Promise<StartedServer> {
         }
       })().catch((err) => {
         logger.error({ err }, "heartbeat scheduler tick failed");
-      }));
+      });
+      trackHeartbeatSchedulerWork(tick);
+      return tick;
     });
   } else {
     startHeartbeatSchedulerInterval(() => {

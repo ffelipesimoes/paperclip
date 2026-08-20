@@ -23,6 +23,7 @@ import {
 import { and, desc, eq, inArray, isNull, ne } from "drizzle-orm";
 import { asNumber, asString, parseObject, renderTemplate } from "../adapters/utils.js";
 import { resolveHomeAwarePath } from "../home-paths.js";
+import { logger } from "../middleware/logger.js";
 import {
   createLocalServiceKey,
   findLocalServiceRegistryRecordByRuntimeServiceId,
@@ -528,6 +529,25 @@ function createProcessOutputCapture(maxBytes: number): ProcessOutputAccumulator 
   };
 }
 
+// Grace period between SIGTERM and the SIGKILL backstop when a bounded
+// process (see `timeoutMs` below) does not exit on its own. Short enough
+// that a hung child never meaningfully outlives its deadline, long enough
+// for git to unwind an index lock / tempfile on a normal signal.
+const DEFAULT_PROCESS_KILL_GRACE_MS = 2_000;
+
+/**
+ * Thrown by `runGit` (only) when the underlying `executeProcess` call was
+ * killed for exceeding its `timeoutMs`. Kept distinct from a plain exit-code
+ * failure so callers can log/report a hung-remote condition specifically
+ * instead of an opaque "git fetch failed" with empty output.
+ */
+class GitCommandTimeoutError extends Error {
+  constructor(message: string, public readonly timeoutMs: number) {
+    super(message);
+    this.name = "GitCommandTimeoutError";
+  }
+}
+
 async function executeProcess(input: {
   command: string;
   args: string[];
@@ -535,10 +555,23 @@ async function executeProcess(input: {
   env?: NodeJS.ProcessEnv;
   maxStdoutBytes?: number;
   maxStderrBytes?: number;
+  /**
+   * When set (> 0), the child is killed if it has not exited after this many
+   * ms: SIGTERM first, then SIGKILL after `killGraceMs` if it is still
+   * alive. Unset/0 preserves the historical unbounded behavior. This exists
+   * because some subprocesses (notably a network `git fetch` against an
+   * unreachable/slow-DNS remote) can otherwise hang indefinitely — with
+   * nothing upstream re-checking or capping in-flight work, each hang would
+   * accumulate as a permanently-blocked child process and Promise.
+   */
+  timeoutMs?: number;
+  /** Grace window between SIGTERM and SIGKILL once `timeoutMs` fires. Defaults to 2s. */
+  killGraceMs?: number;
 }): Promise<{
   stdout: string;
   stderr: string;
   code: number | null;
+  timedOut: boolean;
   stdoutTruncated: boolean;
   stderrTruncated: boolean;
   stdoutBytes: number;
@@ -548,6 +581,7 @@ async function executeProcess(input: {
     stdout: ProcessOutputAccumulator;
     stderr: ProcessOutputAccumulator;
     code: number | null;
+    timedOut: boolean;
   }>((resolve, reject) => {
     const child = spawn(input.command, input.args, {
       cwd: input.cwd,
@@ -562,8 +596,61 @@ async function executeProcess(input: {
     child.stderr?.on("data", (chunk) => {
       stderr.append(String(chunk));
     });
-    child.on("error", reject);
-    child.on("close", (code) => resolve({ stdout, stderr, code }));
+
+    let settled = false;
+    let timedOut = false;
+    let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
+    let killGraceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const clearTimers = () => {
+      if (deadlineTimer) {
+        clearTimeout(deadlineTimer);
+        deadlineTimer = null;
+      }
+      if (killGraceTimer) {
+        clearTimeout(killGraceTimer);
+        killGraceTimer = null;
+      }
+    };
+
+    if (input.timeoutMs && input.timeoutMs > 0) {
+      deadlineTimer = setTimeout(() => {
+        if (settled) return;
+        timedOut = true;
+        // Ask nicely first: SIGTERM lets git unwind an index lock / tempfile
+        // cleanly. A hung network op (DNS resolution, TCP connect) usually
+        // ignores it, so the SIGKILL backstop below guarantees the child
+        // never outlives the deadline indefinitely.
+        try {
+          child.kill("SIGTERM");
+        } catch {
+          // Process already gone; the close/error handler below settles.
+        }
+        killGraceTimer = setTimeout(() => {
+          if (settled) return;
+          try {
+            child.kill("SIGKILL");
+          } catch {
+            // Already gone.
+          }
+        }, input.killGraceMs ?? DEFAULT_PROCESS_KILL_GRACE_MS);
+        killGraceTimer.unref?.();
+      }, input.timeoutMs);
+      deadlineTimer.unref?.();
+    }
+
+    child.on("error", (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimers();
+      reject(err);
+    });
+    child.on("close", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimers();
+      resolve({ stdout, stderr, code, timedOut });
+    });
   });
   const stdout = proc.stdout.finish();
   const stderr = proc.stderr.finish();
@@ -571,6 +658,7 @@ async function executeProcess(input: {
     stdout: stdout.text,
     stderr: stderr.text,
     code: proc.code,
+    timedOut: proc.timedOut,
     stdoutTruncated: stdout.truncated,
     stderrTruncated: stderr.truncated,
     stdoutBytes: stdout.totalBytes,
@@ -578,13 +666,24 @@ async function executeProcess(input: {
   };
 }
 
-async function runGit(args: string[], cwd: string, opts?: { env?: NodeJS.ProcessEnv }): Promise<string> {
+async function runGit(
+  args: string[],
+  cwd: string,
+  opts?: { env?: NodeJS.ProcessEnv; timeoutMs?: number },
+): Promise<string> {
   const proc = await executeProcess({
     command: "git",
     args,
     cwd,
     env: opts?.env,
+    timeoutMs: opts?.timeoutMs,
   });
+  if (proc.timedOut) {
+    throw new GitCommandTimeoutError(
+      `git ${args.join(" ")} timed out after ${opts?.timeoutMs ?? 0}ms in ${cwd}`,
+      opts?.timeoutMs ?? 0,
+    );
+  }
   if (proc.code !== 0) {
     throw new Error(proc.stderr.trim() || proc.stdout.trim() || `git ${args.join(" ")} failed`);
   }
@@ -614,6 +713,25 @@ function parseRemoteTrackingRef(ref: string): { remote: string; branch: string }
   return { remote, branch };
 }
 
+// `git fetch` is the one git(1) invocation on this path that talks to the
+// network: a DNS failure or an unreachable/black-holed remote can leave the
+// underlying connect attempt hanging far longer than any local git command
+// ever would, with nothing here to notice or cap it. This is called from
+// every workspace realization and several periodic reconciliation sweeps, so
+// an unbounded hang here can pile up indefinitely across concurrent runs.
+// Bound it explicitly. 20s gives real (slow) remotes room to answer while
+// still cutting off a genuinely unreachable host quickly; self-hosters on
+// slower links can widen it. 0/negative restores the historical unbounded
+// wait.
+const DEFAULT_GIT_FETCH_TIMEOUT_MS = 20_000;
+
+function resolveGitFetchTimeoutMs(): number {
+  const raw = process.env.PAPERCLIP_GIT_FETCH_TIMEOUT_MS?.trim();
+  if (!raw) return DEFAULT_GIT_FETCH_TIMEOUT_MS;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_GIT_FETCH_TIMEOUT_MS;
+}
+
 export async function refreshRemoteTrackingBaseRef(
   repoRoot: string,
   baseRef: string,
@@ -628,6 +746,7 @@ export async function refreshRemoteTrackingBaseRef(
   if (!remoteUrl) return [];
 
   const auth = resolveGitAuth ? await resolveGitAuth(remoteUrl).catch(() => null) : null;
+  const fetchTimeoutMs = resolveGitFetchTimeoutMs();
   try {
     await runGit([
       ...(auth?.configArgs ?? []),
@@ -635,9 +754,22 @@ export async function refreshRemoteTrackingBaseRef(
       "--prune",
       remoteTracking.remote,
       `+refs/heads/${remoteTracking.branch}:refs/remotes/${remoteTracking.remote}/${remoteTracking.branch}`,
-    ], repoRoot, auth ? { env: { ...process.env, ...auth.env } } : undefined);
+    ], repoRoot, {
+      timeoutMs: fetchTimeoutMs,
+      ...(auth ? { env: { ...process.env, ...auth.env } } : {}),
+    });
     return [];
   } catch (error) {
+    if (error instanceof GitCommandTimeoutError) {
+      const timeoutSec = Math.round(fetchTimeoutMs / 1000);
+      logger.warn(
+        { repoRoot, baseRef, remote: remoteTracking.remote, branch: remoteTracking.branch, timeoutMs: fetchTimeoutMs },
+        `git fetch timed out after ${timeoutSec}s for workspace ${repoRoot} — remote may be unreachable`,
+      );
+      return [
+        `Could not refresh base ref ${baseRef} before preparing the execution workspace: git fetch timed out after ${timeoutSec}s — the remote may be unreachable or unresponsive.`,
+      ];
+    }
     const rawMessage = error instanceof Error ? error.message : String(error);
     // Mask URL userinfo (any scheme) and whole URL query strings before the message rides
     // warnings that reach run logs.
