@@ -18,6 +18,10 @@ import {
   runAdapterExecutionTargetProcess,
 } from "@paperclipai/adapter-utils/execution-target";
 import {
+  resolveDefaultAgentMaxTurns,
+  resolveDefaultAgentTimeoutSec,
+} from "@paperclipai/adapter-utils/agent-defaults";
+import {
   asBoolean,
   asNumber,
   asString,
@@ -205,7 +209,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const model = asString(config.model, DEFAULT_GROK_LOCAL_MODEL).trim();
   const permissionMode = asString(config.permissionMode, "dontAsk").trim() || "dontAsk";
   const reasoningEffort = asString(config.reasoningEffort, "").trim();
-  const maxTurns = asNumber(config.maxTurns, 0);
+  const maxTurns = asNumber(config.maxTurns, resolveDefaultAgentMaxTurns());
   const alwaysApprove = asBoolean(config.alwaysApprove, true);
   const disableWebSearch = asBoolean(config.disableWebSearch, true);
 
@@ -296,7 +300,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
     const timeoutSec = resolveAdapterExecutionTargetTimeoutSec(
       executionTarget,
-      asNumber(config.timeoutSec, 0),
+      asNumber(config.timeoutSec, resolveDefaultAgentTimeoutSec()),
     );
     const graceSec = asNumber(config.graceSec, 20);
     await ensureAdapterExecutionTargetRuntimeCommandInstalled({

@@ -65,6 +65,7 @@ export {
   redactCommandText,
 } from "./command-redaction.js";
 export { buildSandboxNpmInstallCommand } from "./sandbox-install-command.js";
+export { DEFAULT_AGENT_TIMEOUT_SEC, DEFAULT_AGENT_MAX_TURNS } from "./agent-defaults.js";
 export {
   buildAdapterEnvConfig,
   parseEnvBindings,

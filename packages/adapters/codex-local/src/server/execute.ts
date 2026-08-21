@@ -28,6 +28,7 @@ import {
   runAdapterExecutionTargetShellCommand,
   startAdapterExecutionTargetPaperclipBridge,
 } from "@paperclipai/adapter-utils/execution-target";
+import { resolveDefaultAgentTimeoutSec } from "@paperclipai/adapter-utils/agent-defaults";
 import {
   asString,
   asNumber,
@@ -739,7 +740,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     );
     const timeoutSec = resolveAdapterExecutionTargetTimeoutSec(
       executionTarget,
-      asNumber(config.timeoutSec, 0),
+      asNumber(config.timeoutSec, resolveDefaultAgentTimeoutSec()),
     );
     const graceSec = asNumber(config.graceSec, 20);
     let effectiveExecutionCwd = targetWorkspaceRealization?.mode === "in_place"

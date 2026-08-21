@@ -1,4 +1,8 @@
-import { buildAdapterEnvConfig, type CreateConfigValues } from "@paperclipai/adapter-utils";
+import {
+  buildAdapterEnvConfig,
+  DEFAULT_AGENT_TIMEOUT_SEC,
+  type CreateConfigValues,
+} from "@paperclipai/adapter-utils";
 import { DEFAULT_GEMINI_LOCAL_MODEL } from "../index.js";
 
 function parseCommaArgs(value: string): string[] {
@@ -21,7 +25,7 @@ export function buildGeminiLocalConfig(v: CreateConfigValues): Record<string, un
     ac.warmHandleIdleMs = v.geminiAcpWarmHandleIdleMs ?? 0;
   }
   ac.model = v.model || DEFAULT_GEMINI_LOCAL_MODEL;
-  ac.timeoutSec = 0;
+  ac.timeoutSec = DEFAULT_AGENT_TIMEOUT_SEC;
   ac.graceSec = 15;
   const env = buildAdapterEnvConfig(v.envBindings, v.envVars);
   if (Object.keys(env).length > 0) ac.env = env;
