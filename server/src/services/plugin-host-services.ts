@@ -99,6 +99,16 @@ const DNS_LOOKUP_TIMEOUT_MS = 5_000;
 const ALLOWED_PROTOCOLS = new Set(["http:", "https:"]);
 const TELEMETRY_EVENT_NAME_REGEX = /^[a-z0-9][a-z0-9_-]*$/;
 
+// The `issues.listComments` plugin RPC used to call issueService.listComments()
+// with no `limit`, which returns every comment ever posted on the issue --
+// unbounded, unlike heartbeat.ts's own wake-context assembly (see
+// MAX_INLINE_WAKE_COMMENTS et al there). A long-running issue thread could
+// pull thousands of comments into a single plugin tool call. Cap it to the
+// most recent PLUGIN_HOST_LIST_COMMENTS_LIMIT comments, well under
+// issueService's own MAX_ISSUE_COMMENT_PAGE_LIMIT (500) hard ceiling; plugins
+// that need to page through more of the thread should use afterCommentId.
+const PLUGIN_HOST_LIST_COMMENTS_LIMIT = 200;
+
 /**
  * Check if an IP address is in a private/reserved range (RFC 1918, loopback,
  * link-local, etc.) that plugins should never be able to reach.
@@ -2362,7 +2372,9 @@ export function buildHostServices(
         const companyId = ensureCompanyId(params.companyId);
         await ensurePluginAvailableForCompany(companyId);
         if (!inCompany(await issues.getById(params.issueId), companyId)) return [];
-        return (await issues.listComments(params.issueId)) as IssueComment[];
+        return (await issues.listComments(params.issueId, {
+          limit: PLUGIN_HOST_LIST_COMMENTS_LIMIT,
+        })) as IssueComment[];
       },
       async createComment(params) {
         const companyId = ensureCompanyId(params.companyId);

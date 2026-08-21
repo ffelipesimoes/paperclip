@@ -8,6 +8,13 @@ import { budgetService } from "./budgets.js";
 import { notifyHireApproved } from "./hire-hook.js";
 import { instanceSettingsService } from "./instance-settings.js";
 
+// listComments() below used to fetch every comment ever posted on an
+// approval with no limit at all -- unlike issueService.listComments(), which
+// at least caps at MAX_ISSUE_COMMENT_PAGE_LIMIT. Give it the same kind of
+// hard ceiling so a pathologically long approval comment thread can't turn
+// one GET /approvals/:id/comments request into an unbounded query/payload.
+const MAX_APPROVAL_COMMENT_LIMIT = 500;
+
 export function approvalService(db: Db) {
   const agentsSvc = agentService(db);
   const budgets = budgetService(db);
@@ -272,9 +279,13 @@ export function approvalService(db: Db) {
         .then((rows) => rows[0]);
     },
 
-    listComments: async (approvalId: string) => {
+    listComments: async (approvalId: string, opts?: { limit?: number | null }) => {
       const existing = await getExistingApproval(approvalId);
       const { censorUsernameInLogs } = await instanceSettings.getGeneral();
+      const limit =
+        opts?.limit && opts.limit > 0
+          ? Math.min(Math.floor(opts.limit), MAX_APPROVAL_COMMENT_LIMIT)
+          : MAX_APPROVAL_COMMENT_LIMIT;
       return db
         .select()
         .from(approvalComments)
@@ -285,6 +296,7 @@ export function approvalService(db: Db) {
           ),
         )
         .orderBy(asc(approvalComments.createdAt))
+        .limit(limit)
         .then((comments) => comments.map((comment) => redactApprovalComment(comment, censorUsernameInLogs)));
     },
 

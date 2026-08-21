@@ -22,6 +22,10 @@ import {
   startAdapterExecutionTargetPaperclipBridge,
 } from "@paperclipai/adapter-utils/execution-target";
 import {
+  resolveDefaultAgentMaxTurns,
+  resolveDefaultAgentTimeoutSec,
+} from "@paperclipai/adapter-utils/agent-defaults";
+import {
   asString,
   asNumber,
   asBoolean,
@@ -156,6 +160,80 @@ function isBedrockAuth(env: Record<string, string>): boolean {
 function resolveClaudeBillingType(env: Record<string, string>): "api" | "subscription" | "metered_api" {
   if (isBedrockAuth(env)) return "metered_api";
   return hasNonEmptyEnvValue(env, "ANTHROPIC_API_KEY") ? "api" : "subscription";
+}
+
+// Nothing capped the combined prompt (bootstrap prompt + wake prompt +
+// session handoff note + task-context markdown + rendered heartbeat
+// template) before it was piped to the Claude CLI's stdin. The task-context
+// markdown in particular is explicitly built as an "authoritative, uncapped
+// brief" (see selectPaperclipTaskMarkdown in @paperclipai/adapter-utils), so
+// a long-running issue thread could grow the prompt without limit -- slowing
+// every turn and burning tokens. 200k chars (~50k tokens) comfortably fits a
+// real task brief while still catching runaway ones; override per-deployment
+// via PAPERCLIP_AGENT_PROMPT_CHAR_BUDGET, mirroring
+// PAPERCLIP_GIT_FETCH_TIMEOUT_MS in server/src/services/workspace-runtime.ts.
+// 0 or a negative value disables the cap.
+const DEFAULT_AGENT_PROMPT_CHAR_BUDGET = 200_000;
+
+function resolveAgentPromptCharBudget(): number {
+  const raw = process.env.PAPERCLIP_AGENT_PROMPT_CHAR_BUDGET?.trim();
+  if (!raw) return DEFAULT_AGENT_PROMPT_CHAR_BUDGET;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) ? parsed : DEFAULT_AGENT_PROMPT_CHAR_BUDGET;
+}
+
+/**
+ * Enforces a hard character-count ceiling on the fully assembled adapter
+ * prompt before it is handed to the subprocess. `taskContextNote` is
+ * truncated first (from the tail, so the issue id/title at its head
+ * survives) since it is the one section documented as uncapped; the other
+ * sections are template- or server-derived and already implicitly bounded.
+ * If that alone is not enough to fit the budget, the fully joined prompt is
+ * hard-truncated as a last-resort safety net so the ceiling is never
+ * exceeded regardless of which section turned out to be the large one.
+ */
+function capAgentPromptToCharBudget(input: {
+  renderedBootstrapPrompt: string;
+  wakePrompt: string;
+  sessionHandoffNote: string;
+  taskContextNote: string;
+  renderedPrompt: string;
+  budgetChars: number;
+}): { prompt: string; originalChars: number; truncated: boolean } {
+  const sections = [
+    input.renderedBootstrapPrompt,
+    input.wakePrompt,
+    input.sessionHandoffNote,
+    input.taskContextNote,
+    input.renderedPrompt,
+  ];
+  const assembled = joinPromptSections(sections);
+  if (input.budgetChars <= 0 || assembled.length <= input.budgetChars) {
+    return { prompt: assembled, originalChars: assembled.length, truncated: false };
+  }
+  const overage = assembled.length - input.budgetChars;
+  const taskContextMarker =
+    `\n\n[... task context truncated: prompt exceeded the ${input.budgetChars}-char budget ` +
+    `(PAPERCLIP_AGENT_PROMPT_CHAR_BUDGET) ...]`;
+  const keepChars = Math.max(0, input.taskContextNote.length - overage - taskContextMarker.length);
+  const truncatedTaskContextNote =
+    keepChars < input.taskContextNote.length
+      ? input.taskContextNote.slice(0, keepChars) + taskContextMarker
+      : input.taskContextNote;
+  let prompt = joinPromptSections([
+    input.renderedBootstrapPrompt,
+    input.wakePrompt,
+    input.sessionHandoffNote,
+    truncatedTaskContextNote,
+    input.renderedPrompt,
+  ]);
+  if (prompt.length > input.budgetChars) {
+    const hardMarker =
+      `\n\n[... prompt truncated: exceeded the ${input.budgetChars}-char budget ` +
+      `(PAPERCLIP_AGENT_PROMPT_CHAR_BUDGET) ...]`;
+    prompt = prompt.slice(0, Math.max(0, input.budgetChars - hardMarker.length)) + hardMarker;
+  }
+  return { prompt, originalChars: assembled.length, truncated: true };
 }
 
 async function buildClaudeRuntimeConfig(input: ClaudeExecutionInput): Promise<ClaudeRuntimeConfig> {
@@ -308,7 +386,7 @@ async function buildClaudeRuntimeConfig(input: ClaudeExecutionInput): Promise<Cl
   );
   const timeoutSec = resolveAdapterExecutionTargetTimeoutSec(
     executionTarget,
-    asNumber(config.timeoutSec, 0),
+    asNumber(config.timeoutSec, resolveDefaultAgentTimeoutSec()),
   );
   const graceSec = asNumber(config.graceSec, 20);
   await ensureAdapterExecutionTargetRuntimeCommandInstalled({
@@ -424,7 +502,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const model = asString(config.model, "");
   const effort = asString(config.effort, "");
   const chrome = asBoolean(config.chrome, false);
-  const maxTurns = asNumber(config.maxTurnsPerRun, 0);
+  const maxTurns = asNumber(config.maxTurnsPerRun, resolveDefaultAgentMaxTurns());
   const dangerouslySkipPermissions = asBoolean(config.dangerouslySkipPermissions, true);
   const configEnv = parseObject(config.env);
   const workspaceContext = parseObject(context.paperclipWorkspace);
@@ -815,15 +893,28 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     ? ""
     : renderTemplate(promptTemplate, templateData);
   const sessionHandoffNote = asString(context.paperclipSessionHandoffMarkdown, "").trim();
-  const prompt = joinPromptSections([
+  const promptCharBudget = resolveAgentPromptCharBudget();
+  const cappedPrompt = capAgentPromptToCharBudget({
     renderedBootstrapPrompt,
     wakePrompt,
     sessionHandoffNote,
     taskContextNote,
     renderedPrompt,
-  ]);
+    budgetChars: promptCharBudget,
+  });
+  const prompt = cappedPrompt.prompt;
+  if (cappedPrompt.truncated) {
+    await onLog(
+      "stdout",
+      `[paperclip] Prompt was ${cappedPrompt.originalChars} chars, exceeding the ${promptCharBudget}-char budget ` +
+        `(PAPERCLIP_AGENT_PROMPT_CHAR_BUDGET); truncated before sending to Claude.\n`,
+    );
+  }
   const promptMetrics = {
     promptChars: prompt.length,
+    // originalPromptChars differs from promptChars exactly when the prompt
+    // was truncated to fit PAPERCLIP_AGENT_PROMPT_CHAR_BUDGET.
+    originalPromptChars: cappedPrompt.originalChars,
     bootstrapPromptChars: renderedBootstrapPrompt.length,
     wakePromptChars: wakePrompt.length,
     sessionHandoffChars: sessionHandoffNote.length,

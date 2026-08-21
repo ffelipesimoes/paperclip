@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DEFAULT_AGENT_TIMEOUT_SEC } from "@paperclipai/adapter-utils";
 import { buildGrokLocalConfig } from "./build-config.js";
 
 describe("buildGrokLocalConfig", () => {
@@ -14,7 +15,7 @@ describe("buildGrokLocalConfig", () => {
       cwd: "/tmp/project",
       instructionsFilePath: "/tmp/AGENTS.md",
       model: "grok-build",
-      timeoutSec: 0,
+      timeoutSec: DEFAULT_AGENT_TIMEOUT_SEC,
       graceSec: 20,
       reasoningEffort: "high",
       env: {

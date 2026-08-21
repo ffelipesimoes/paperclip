@@ -1,4 +1,8 @@
-import { buildAdapterEnvConfig, type CreateConfigValues } from "@paperclipai/adapter-utils";
+import {
+  buildAdapterEnvConfig,
+  DEFAULT_AGENT_TIMEOUT_SEC,
+  type CreateConfigValues,
+} from "@paperclipai/adapter-utils";
 
 export function buildPiLocalConfig(v: CreateConfigValues): Record<string, unknown> {
   const ac: Record<string, unknown> = {};
@@ -6,9 +10,13 @@ export function buildPiLocalConfig(v: CreateConfigValues): Record<string, unknow
   if (v.instructionsFilePath) ac.instructionsFilePath = v.instructionsFilePath;
   if (v.model) ac.model = v.model;
   if (v.thinkingEffort) ac.thinking = v.thinkingEffort;
-  
-  // Pi sessions can run until the CLI exits naturally; keep timeout disabled (0)
-  ac.timeoutSec = 0;
+
+  // Pi sessions can run until the CLI exits naturally, but an unbounded
+  // wall-clock timeout let a single stuck/over-exploring run loop forever
+  // (see DEFAULT_AGENT_TIMEOUT_SEC doc comment). Apply the same sane floor as
+  // the other local adapters; set adapterConfig.timeoutSec explicitly (0 or
+  // negative) to restore the old unbounded behavior for this agent.
+  ac.timeoutSec = DEFAULT_AGENT_TIMEOUT_SEC;
   ac.graceSec = 20;
   
   const env = buildAdapterEnvConfig(v.envBindings, v.envVars);

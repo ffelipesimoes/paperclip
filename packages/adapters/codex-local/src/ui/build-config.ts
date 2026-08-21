@@ -1,4 +1,8 @@
-import { buildAdapterEnvConfig, type CreateConfigValues } from "@paperclipai/adapter-utils";
+import {
+  buildAdapterEnvConfig,
+  DEFAULT_AGENT_TIMEOUT_SEC,
+  type CreateConfigValues,
+} from "@paperclipai/adapter-utils";
 import { DEFAULT_CODEX_LOCAL_BYPASS_APPROVALS_AND_SANDBOX } from "../index.js";
 
 function parseCommaArgs(value: string): string[] {
@@ -34,7 +38,7 @@ export function buildCodexLocalConfig(v: CreateConfigValues): Record<string, unk
     if (v.codexAcpStateDir) ac.stateDir = v.codexAcpStateDir;
     ac.warmHandleIdleMs = v.codexAcpWarmHandleIdleMs ?? 0;
   }
-  ac.timeoutSec = 0;
+  ac.timeoutSec = DEFAULT_AGENT_TIMEOUT_SEC;
   ac.graceSec = 15;
   const env = buildAdapterEnvConfig(v.envBindings, v.envVars);
   if (Object.keys(env).length > 0) ac.env = env;
