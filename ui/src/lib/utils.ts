@@ -184,6 +184,19 @@ export function visibleRunCostUsd(
   return readRunCostUsd(usage) || readRunCostUsd(result);
 }
 
+export function simulatedRunCostUsd(
+  usage: Record<string, unknown> | null,
+  result: Record<string, unknown> | null = null,
+): number {
+  const sim = usage?.simulatedCostUsd ?? result?.simulatedCostUsd;
+  if (typeof sim === "number" && Number.isFinite(sim)) return sim;
+  const simCents = usage?.simulatedCostCents ?? result?.simulatedCostCents;
+  if (typeof simCents === "number" && Number.isFinite(simCents)) return simCents / 100;
+  return 0;
+}
+
+export const formatRuntimeMs = formatDurationMs;
+
 export function financeEventKindDisplayName(eventKind: FinanceEventKind): string {
   const map: Record<FinanceEventKind, string> = {
     inference_charge: "Inference charge",

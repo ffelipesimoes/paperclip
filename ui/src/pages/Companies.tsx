@@ -1,12 +1,14 @@
 import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCompany } from "../context/CompanyContext";
 import { useDialogActions } from "../context/DialogContext";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
 import { useCloudInstance } from "../hooks/useCloudInstance";
 import { companiesApi } from "../api/companies";
+import { accessApi } from "../api/access";
 import { queryKeys } from "../lib/queryKeys";
-import { formatCents, relativeTime } from "../lib/utils";
+import { formatCents, formatDurationMs, formatTokens, relativeTime } from "../lib/utils";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -30,6 +32,9 @@ import {
   DollarSign,
   Calendar,
   ArchiveRestore,
+  Activity,
+  Cpu,
+  Zap,
 } from "lucide-react";
 
 export function Companies() {
@@ -51,6 +56,13 @@ export function Companies() {
     queryKey: queryKeys.companies.stats,
     queryFn: () => companiesApi.stats(),
   });
+
+  const { data: boardAccess } = useQuery({
+    queryKey: queryKeys.access.currentBoardAccess,
+    queryFn: () => accessApi.getCurrentBoardAccess(),
+    retry: false,
+  });
+  const isInstanceAdmin = Boolean(boardAccess?.isInstanceAdmin);
 
   // Inline edit state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -109,7 +121,15 @@ export function Companies() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-end">
+      <div className="flex items-center justify-end gap-2">
+        {isInstanceAdmin ? (
+          <Button variant="outline" size="sm" asChild>
+            <Link to="/company/settings/instance/observability">
+              <Activity className="h-3.5 w-3.5 mr-1.5" />
+              Instance Observability
+            </Link>
+          </Button>
+        ) : null}
         {isCloud ? null : (
           <Button size="sm" onClick={() => openOnboarding()}>
             <Plus className="h-3.5 w-3.5 mr-1.5" />
@@ -266,6 +286,11 @@ export function Companies() {
                   <Users className="h-3.5 w-3.5" />
                   <span>
                     {agentCount} {agentCount === 1 ? "agent" : "agents"}
+                    {(companyStats?.activeAgentCount ?? 0) > 0 && (
+                      <span className="text-xs text-muted-foreground ml-1">
+                        ({companyStats?.activeAgentCount} active)
+                      </span>
+                    )}
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5">
@@ -274,6 +299,31 @@ export function Companies() {
                     {issueCount} {issueCount === 1 ? "task" : "tasks"}
                   </span>
                 </div>
+                {(companyStats?.runCount ?? 0) > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <Activity className="h-3.5 w-3.5" />
+                    <span>
+                      {companyStats?.runCount} {companyStats?.runCount === 1 ? "run" : "runs"}
+                      {(companyStats?.activeRunCount ?? 0) > 0 && (
+                        <span className="text-xs text-green-600 dark:text-green-400 font-medium ml-1">
+                          ({companyStats?.activeRunCount} active)
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                )}
+                {(companyStats?.runtimeMs ?? 0) > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <Cpu className="h-3.5 w-3.5" />
+                    <span>{formatDurationMs(companyStats?.runtimeMs ?? 0)} compute</span>
+                  </div>
+                )}
+                {(companyStats?.totalTokens ?? 0) > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <Zap className="h-3.5 w-3.5" />
+                    <span>{formatTokens(companyStats?.totalTokens ?? 0)} tok</span>
+                  </div>
+                )}
                 <div className="flex items-center gap-1.5 tabular-nums">
                   <DollarSign className="h-3.5 w-3.5" />
                   <span>
@@ -281,6 +331,11 @@ export function Companies() {
                     {company.budgetMonthlyCents > 0
                       ? <> / {formatCents(company.budgetMonthlyCents)} <span className="text-xs">({budgetPct}%)</span></>
                       : <span className="text-xs ml-1">Unlimited budget</span>}
+                    {company.spentMonthlyCents === 0 && (companyStats?.simulatedCostCents ?? 0) > 0 && (
+                      <span className="text-xs text-muted-foreground ml-1.5" title="Simulated subscription cost based on token usage">
+                        (sim. {formatCents(companyStats?.simulatedCostCents ?? 0)})
+                      </span>
+                    )}
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5 ml-auto">

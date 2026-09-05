@@ -27,6 +27,8 @@ export interface CostSummary {
   spendCents: number;
   budgetCents: number;
   utilizationPercent: number;
+  simulatedCostCents?: number;
+  subscriptionTokens?: number;
 }
 
 export interface IssueCostSummary {
@@ -49,6 +51,7 @@ export interface CostByAgent {
   agentName: string | null;
   agentStatus: string | null;
   costCents: number;
+  simulatedCostCents?: number;
   inputTokens: number;
   cachedInputTokens: number;
   outputTokens: number;
@@ -65,6 +68,7 @@ export interface CostByProviderModel {
   billingType: BillingType;
   model: string;
   costCents: number;
+  simulatedCostCents?: number;
   inputTokens: number;
   cachedInputTokens: number;
   outputTokens: number;
@@ -78,6 +82,7 @@ export interface CostByProviderModel {
 export interface CostByBiller {
   biller: string;
   costCents: number;
+  simulatedCostCents?: number;
   inputTokens: number;
   cachedInputTokens: number;
   outputTokens: number;
@@ -99,6 +104,7 @@ export interface CostByAgentModel {
   billingType: BillingType;
   model: string;
   costCents: number;
+  simulatedCostCents?: number;
   inputTokens: number;
   cachedInputTokens: number;
   outputTokens: number;
@@ -126,4 +132,47 @@ export interface CostByProject {
   inputTokens: number;
   cachedInputTokens: number;
   outputTokens: number;
+}
+
+export interface CompanyComputeUsage {
+  companyId: string;
+  companyName: string;
+  companyPrefix: string;
+  companyStatus: "active" | "paused" | "archived";
+  createdAt: string;
+  agentCount: number;
+  activeAgentCount: number;
+  issueCount: number;
+  runCount: number;
+  activeRunCount: number;
+  runtimeMs: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costCents: number;
+  simulatedCostCents: number;
+  subscriptionTokens: number;
+  subscriptionRunCount: number;
+}
+
+export interface InstanceObservabilitySummary {
+  window: string;
+  totalCompanies: number;
+  activeCompanies: number;
+  totalAgents: number;
+  activeAgents: number;
+  totalIssues: number;
+  totalRuns: number;
+  activeRuns: number;
+  totalRuntimeMs: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  billedCostCents: number;
+  simulatedCostCents: number;
+  subscriptionTokens: number;
+  subscriptionRunCount: number;
+  companies: CompanyComputeUsage[];
 }

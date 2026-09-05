@@ -44,6 +44,8 @@ import {
   type RoutineRevisionSnapshotV1,
   type RunLivenessState,
   type SourceTrustMetadata,
+  simulateCostCents,
+  simulateCostUsd,
 } from "@paperclipai/shared";
 import {
   agents,
@@ -21653,6 +21655,20 @@ export function heartbeatService(
                 billingType: normalizeLedgerBillingType(
                   adapterResult.billingType,
                 ),
+                simulatedCostUsd: simulateCostUsd({
+                  model: readNonEmptyString(adapterResult.model) ?? "unknown",
+                  provider: readNonEmptyString(adapterResult.provider) ?? "unknown",
+                  inputTokens: normalizedUsage?.inputTokens ?? 0,
+                  cachedInputTokens: normalizedUsage?.cachedInputTokens ?? 0,
+                  outputTokens: normalizedUsage?.outputTokens ?? 0,
+                }),
+                simulatedCostCents: simulateCostCents({
+                  model: readNonEmptyString(adapterResult.model) ?? "unknown",
+                  provider: readNonEmptyString(adapterResult.provider) ?? "unknown",
+                  inputTokens: normalizedUsage?.inputTokens ?? 0,
+                  cachedInputTokens: normalizedUsage?.cachedInputTokens ?? 0,
+                  outputTokens: normalizedUsage?.outputTokens ?? 0,
+                }),
               } as Record<string, unknown>)
             : null;
 

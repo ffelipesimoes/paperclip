@@ -12,6 +12,7 @@ import {
   companySkillVersions,
   companySkills,
   companyMemberships,
+  costEvents,
   createDb,
   heartbeatRunEvents,
   heartbeatRuns,
@@ -58,6 +59,7 @@ describeEmbeddedPostgres("companyService", () => {
     await db.delete(agentWakeupRequests);
     await db.delete(agentConfigRevisions);
     await db.delete(activityLog);
+    await db.delete(costEvents);
     await db.delete(agents);
     await db.delete(principalPermissionGrants);
     await db.delete(companyMemberships);
@@ -1107,4 +1109,105 @@ describeEmbeddedPostgres("companyService", () => {
     });
   });
 
+  it("computes comprehensive company stats with compute runtime, tokens, and simulated costs", async () => {
+    const company = await companyService(db).create({ name: "Observability Co" });
+    const companyId = company.id;
+
+    const [agent1, agent2] = await Promise.all([
+      db
+        .insert(agents)
+        .values({
+          companyId,
+          name: "Active Agent",
+          status: "running",
+          adapterType: "claude_local",
+        })
+        .returning()
+        .then((rows) => rows[0]),
+      db
+        .insert(agents)
+        .values({
+          companyId,
+          name: "Paused Agent",
+          status: "paused",
+          adapterType: "codex_local",
+        })
+        .returning()
+        .then((rows) => rows[0]),
+    ]);
+
+    await db.insert(issues).values([
+      { companyId, title: "Task 1", status: "todo" },
+      { companyId, title: "Task 2", status: "done" },
+    ]);
+
+    // Insert heartbeat runs: 1 finished (5000ms), 1 running
+    const now = new Date();
+    const fiveSecAgo = new Date(now.getTime() - 5000);
+    await db.insert(heartbeatRuns).values([
+      {
+        companyId,
+        agentId: agent1.id,
+        status: "succeeded",
+        startedAt: fiveSecAgo,
+        finishedAt: now,
+      },
+      {
+        companyId,
+        agentId: agent1.id,
+        status: "running",
+        startedAt: now,
+      },
+    ]);
+
+    // Insert cost events:
+    // 1 subscription run: 1M input, 200k output on Sonnet -> $6.00 simulated, $0 billed
+    // 1 metered run: $1.50 billed
+    await db.insert(costEvents).values([
+      {
+        companyId,
+        agentId: agent1.id,
+        provider: "anthropic",
+        biller: "anthropic",
+        billingType: "subscription_included",
+        model: "claude-3-5-sonnet",
+        inputTokens: 1_000_000,
+        cachedInputTokens: 0,
+        outputTokens: 200_000,
+        costCents: 0,
+        occurredAt: now,
+      },
+      {
+        companyId,
+        agentId: agent2.id,
+        provider: "openai",
+        biller: "openai",
+        billingType: "metered_api",
+        model: "gpt-4o",
+        inputTokens: 100_000,
+        cachedInputTokens: 0,
+        outputTokens: 20_000,
+        costCents: 150,
+        occurredAt: now,
+      },
+    ]);
+
+    const stats = await companyService(db).stats();
+    const coStats = stats[companyId];
+
+    expect(coStats).toBeDefined();
+    expect(coStats.agentCount).toBe(2);
+    expect(coStats.activeAgentCount).toBe(1); // agent1 is running, agent2 is paused
+    expect(coStats.issueCount).toBe(2);
+    expect(coStats.runCount).toBe(2);
+    expect(coStats.activeRunCount).toBe(1);
+    expect(coStats.runtimeMs).toBeGreaterThanOrEqual(4900);
+    expect(coStats.costCents).toBe(150);
+    expect(coStats.inputTokens).toBe(1_100_000);
+    expect(coStats.outputTokens).toBe(220_000);
+    expect(coStats.totalTokens).toBe(1_320_000);
+    expect(coStats.subscriptionTokens).toBe(1_200_000);
+    // Sonnet simulated: 600 cents + gpt-4o simulated: 100k*2.5/M ($0.25) + 20k*10/M ($0.20) = $0.45 = 45 cents -> total 645 cents
+    expect(coStats.simulatedCostCents).toBe(645);
+  });
 });

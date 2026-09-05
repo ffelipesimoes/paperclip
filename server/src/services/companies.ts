@@ -47,6 +47,7 @@ import { environmentService } from "./environments.js";
 import { heartbeatService } from "./heartbeat.js";
 import { logActivity } from "./activity-log.js";
 import { builtInAgentService } from "./built-in-agents.js";
+import { simulateCostCents } from "@paperclipai/shared";
 
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -570,29 +571,133 @@ export function companyService(db: Db) {
         return rows[0] ?? null;
       }),
 
-    stats: () =>
-      Promise.all([
+    stats: async () => {
+      const [agentRows, issueRows, runRows, costRows] = await Promise.all([
         db
-          .select({ companyId: agents.companyId, count: count() })
+          .select({
+            companyId: agents.companyId,
+            agentCount: count(),
+            activeAgentCount: sql<number>`count(case when ${agents.status} not in ('paused', 'terminated', 'pending_approval') then 1 end)::int`,
+          })
           .from(agents)
           .groupBy(agents.companyId),
         db
           .select({ companyId: issues.companyId, count: count() })
           .from(issues)
+          .where(isNull(issues.hiddenAt))
           .groupBy(issues.companyId),
-      ]).then(([agentRows, issueRows]) => {
-        const result: Record<string, { agentCount: number; issueCount: number }> = {};
-        for (const row of agentRows) {
-          result[row.companyId] = { agentCount: row.count, issueCount: 0 };
+        db
+          .select({
+            companyId: heartbeatRuns.companyId,
+            runCount: sql<number>`count(*)::int`,
+            activeRunCount: sql<number>`count(case when ${heartbeatRuns.status} = 'running' then 1 end)::int`,
+            runtimeMs: sql<number>`coalesce(sum(case when ${heartbeatRuns.startedAt} is not null then extract(epoch from (coalesce(${heartbeatRuns.finishedAt}, now()) - ${heartbeatRuns.startedAt})) * 1000 else 0 end), 0)::double precision`,
+          })
+          .from(heartbeatRuns)
+          .groupBy(heartbeatRuns.companyId),
+        db
+          .select({
+            companyId: costEvents.companyId,
+            model: costEvents.model,
+            provider: costEvents.provider,
+            billingType: costEvents.billingType,
+            costCents: sql<number>`coalesce(sum(${costEvents.costCents}), 0)::double precision`,
+            inputTokens: sql<number>`coalesce(sum(${costEvents.inputTokens}), 0)::double precision`,
+            cachedInputTokens: sql<number>`coalesce(sum(${costEvents.cachedInputTokens}), 0)::double precision`,
+            outputTokens: sql<number>`coalesce(sum(${costEvents.outputTokens}), 0)::double precision`,
+            subscriptionRunCount: sql<number>`count(distinct case when ${costEvents.billingType} in ('subscription_included', 'subscription_overage') then ${costEvents.heartbeatRunId} end)::int`,
+          })
+          .from(costEvents)
+          .groupBy(costEvents.companyId, costEvents.model, costEvents.provider, costEvents.billingType),
+      ]);
+
+      const result: Record<
+        string,
+        {
+          agentCount: number;
+          activeAgentCount: number;
+          issueCount: number;
+          runCount: number;
+          activeRunCount: number;
+          runtimeMs: number;
+          inputTokens: number;
+          cachedInputTokens: number;
+          outputTokens: number;
+          totalTokens: number;
+          costCents: number;
+          simulatedCostCents: number;
+          subscriptionTokens: number;
+          subscriptionRunCount: number;
         }
-        for (const row of issueRows) {
-          if (result[row.companyId]) {
-            result[row.companyId].issueCount = row.count;
-          } else {
-            result[row.companyId] = { agentCount: 0, issueCount: row.count };
-          }
+      > = {};
+
+      const getOrCreate = (companyId: string) => {
+        if (!result[companyId]) {
+          result[companyId] = {
+            agentCount: 0,
+            activeAgentCount: 0,
+            issueCount: 0,
+            runCount: 0,
+            activeRunCount: 0,
+            runtimeMs: 0,
+            inputTokens: 0,
+            cachedInputTokens: 0,
+            outputTokens: 0,
+            totalTokens: 0,
+            costCents: 0,
+            simulatedCostCents: 0,
+            subscriptionTokens: 0,
+            subscriptionRunCount: 0,
+          };
         }
-        return result;
-      }),
+        return result[companyId];
+      };
+
+      for (const row of agentRows) {
+        const item = getOrCreate(row.companyId);
+        item.agentCount = row.agentCount;
+        item.activeAgentCount = Number(row.activeAgentCount ?? 0);
+      }
+
+      for (const row of issueRows) {
+        const item = getOrCreate(row.companyId);
+        item.issueCount = row.count;
+      }
+
+      for (const row of runRows) {
+        const item = getOrCreate(row.companyId);
+        item.runCount = Number(row.runCount ?? 0);
+        item.activeRunCount = Number(row.activeRunCount ?? 0);
+        item.runtimeMs = Number(row.runtimeMs ?? 0);
+      }
+
+      for (const row of costRows) {
+        const item = getOrCreate(row.companyId);
+        const inTok = Number(row.inputTokens ?? 0);
+        const cacheTok = Number(row.cachedInputTokens ?? 0);
+        const outTok = Number(row.outputTokens ?? 0);
+        const costC = Number(row.costCents ?? 0);
+        const simC = simulateCostCents({
+          model: row.model,
+          provider: row.provider,
+          inputTokens: inTok,
+          cachedInputTokens: cacheTok,
+          outputTokens: outTok,
+        });
+
+        item.inputTokens += inTok;
+        item.cachedInputTokens += cacheTok;
+        item.outputTokens += outTok;
+        item.totalTokens += inTok + cacheTok + outTok;
+        item.costCents += costC;
+        item.simulatedCostCents += simC;
+        if (row.billingType !== "metered_api") {
+          item.subscriptionTokens += inTok + cacheTok + outTok;
+        }
+        item.subscriptionRunCount += Number(row.subscriptionRunCount ?? 0);
+      }
+
+      return result;
+    },
   };
 }

@@ -54,7 +54,7 @@ import { SourceResolvedFoldCallout } from "../components/SourceResolvedFoldCallo
 import { SourceResolvedFoldBadge } from "../components/SourceResolvedFoldBadge";
 import { readSourceResolvedWatchdogFold } from "../lib/source-resolved-watchdog-fold";
 import { buildSameOriginWebSocketUrl } from "../lib/websocket-url";
-import { formatDate, relativeTime, formatTokens, visibleRunCostUsd } from "../lib/utils";
+import { formatDate, relativeTime, formatTokens, visibleRunCostUsd, simulatedRunCostUsd } from "../lib/utils";
 import { cn } from "../lib/utils";
 import { describeRunRetryState } from "../lib/runRetryState";
 import { Button } from "@/components/ui/button";
@@ -367,6 +367,8 @@ function runMetrics(run: HeartbeatRun) {
   );
   const cost =
     visibleRunCostUsd(usage, result);
+  const simulatedCost =
+    simulatedRunCostUsd(usage, result);
   const provider = asNonEmptyString(usage?.provider) ?? null;
   const model = asNonEmptyString(usage?.model) ?? null;
   return {
@@ -374,6 +376,7 @@ function runMetrics(run: HeartbeatRun) {
     output,
     cached,
     cost,
+    simulatedCost,
     totalTokens: input + output,
     provider,
     model,
@@ -3162,10 +3165,14 @@ function RunListItem({ run, isSelected, agentId }: { run: HeartbeatRun; isSelect
           {summary.slice(0, 60)}
         </span>
       )}
-      {(metrics.totalTokens > 0 || metrics.cost > 0) && (
+      {(metrics.totalTokens > 0 || metrics.cost > 0 || metrics.simulatedCost > 0) && (
         <div className="flex items-center gap-2 pl-5.5 text-(length:--text-micro) text-muted-foreground tabular-nums">
           {metrics.totalTokens > 0 && <span>{formatTokens(metrics.totalTokens)} tok</span>}
-          {metrics.cost > 0 && <span>${metrics.cost.toFixed(3)}</span>}
+          {metrics.cost > 0 ? (
+            <span>${metrics.cost.toFixed(3)}</span>
+          ) : metrics.simulatedCost > 0 ? (
+            <span title="Simulated cost based on token pricing">$0.00 (sim. ${metrics.simulatedCost.toFixed(3)})</span>
+          ) : null}
         </div>
       )}
     </Link>
@@ -3461,7 +3468,7 @@ function RunDetail({ run: initialRun, agentRouteId, adapterType, adapterConfig }
     ? Math.round((new Date(run.finishedAt).getTime() - new Date(run.startedAt).getTime()) / 1000)
     : null;
   const displayDurationSec = durationSec ?? (isRunning ? elapsedSec : null);
-  const hasMetrics = metrics.input > 0 || metrics.output > 0 || metrics.cached > 0 || metrics.cost > 0;
+  const hasMetrics = metrics.input > 0 || metrics.output > 0 || metrics.cached > 0 || metrics.cost > 0 || metrics.simulatedCost > 0;
   const hasSession = !!(run.sessionIdBefore || run.sessionIdAfter);
   const sessionChanged = run.sessionIdBefore && run.sessionIdAfter && run.sessionIdBefore !== run.sessionIdAfter;
   const sessionId = run.sessionIdAfter || run.sessionIdBefore;
@@ -3715,7 +3722,13 @@ function RunDetail({ run: initialRun, agentRouteId, adapterType, adapterConfig }
               </div>
               <div>
                 <div className="text-xs text-muted-foreground">Cost</div>
-                <div className="text-sm font-medium font-mono">{metrics.cost > 0 ? `$${metrics.cost.toFixed(4)}` : "-"}</div>
+                <div className="text-sm font-medium font-mono">
+                  {metrics.cost > 0
+                    ? `$${metrics.cost.toFixed(4)}`
+                    : metrics.simulatedCost > 0
+                      ? `$0.00 (sim. $${metrics.simulatedCost.toFixed(4)})`
+                      : "-"}
+                </div>
               </div>
             </div>
           )}

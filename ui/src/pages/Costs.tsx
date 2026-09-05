@@ -609,7 +609,11 @@ export function Costs({
             <MetricTile
               label="Inference spend"
               value={formatCents(spendData?.summary.spendCents ?? 0)}
-              subtitle={`${formatTokens(inferenceTokenTotal)} tokens across request-scoped events`}
+              subtitle={
+                (spendData?.summary.simulatedCostCents ?? 0) > 0 && (spendData?.summary.spendCents ?? 0) === 0
+                  ? `${formatTokens(inferenceTokenTotal)} tokens · Sim. value: ${formatCents(spendData?.summary.simulatedCostCents ?? 0)}`
+                  : `${formatTokens(inferenceTokenTotal)} tokens across request-scoped events`
+              }
               icon={DollarSign}
             />
             <MetricTile
@@ -708,6 +712,11 @@ export function Costs({
                         <div className="mt-1 text-lg font-medium tabular-nums">
                           {formatTokens(inferenceTokenTotal)}
                         </div>
+                        {((spendData?.summary.subscriptionTokens ?? 0) > 0 || (spendData?.summary.simulatedCostCents ?? 0) > 0) ? (
+                          <div className="text-xs text-muted-foreground mt-0.5">
+                            sim. {formatCents(spendData?.summary.simulatedCostCents ?? 0)}
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                     {spendData?.summary.budgetCents && spendData.summary.budgetCents > 0 ? (
@@ -774,7 +783,14 @@ export function Costs({
                                 {row.agentStatus === "terminated" ? <StatusBadge status="terminated" /> : null}
                               </div>
                               <div className="text-right text-sm tabular-nums">
-                                <div className="font-medium">{formatCents(row.costCents)}</div>
+                                <div className="font-medium">
+                                  {formatCents(row.costCents)}
+                                  {row.costCents === 0 && (row.simulatedCostCents ?? 0) > 0 ? (
+                                    <span className="ml-1 text-xs text-muted-foreground font-normal">
+                                      (sim. {formatCents(row.simulatedCostCents ?? 0)})
+                                    </span>
+                                  ) : null}
+                                </div>
                                 <div className="text-xs text-muted-foreground">
                                   in {formatTokens(row.inputTokens + row.cachedInputTokens)} · out {formatTokens(row.outputTokens)}
                                 </div>
@@ -812,7 +828,11 @@ export function Costs({
                                       <div className="text-right tabular-nums">
                                         <div className="font-medium">
                                           {formatCents(modelRow.costCents)}
-                                          <span className="ml-1 font-normal text-muted-foreground">({sharePct}%)</span>
+                                          {modelRow.costCents > 0 ? (
+                                            <span className="ml-1 font-normal text-muted-foreground">({sharePct}%)</span>
+                                          ) : (modelRow.simulatedCostCents ?? 0) > 0 ? (
+                                            <span className="ml-1 font-normal text-muted-foreground text-xs">(sim. {formatCents(modelRow.simulatedCostCents ?? 0)})</span>
+                                          ) : null}
                                         </div>
                                         <div className="text-muted-foreground">
                                           {formatTokens(modelRow.inputTokens + modelRow.cachedInputTokens + modelRow.outputTokens)} tok
