@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import {
+  Activity,
   ChevronLeft,
   Clock3,
   Cpu,
@@ -148,6 +149,14 @@ export function CompanySettingsSidebar() {
               to={`${INSTANCE_SETTINGS_PATH_PREFIX}/access`}
               label="Access"
               icon={Shield}
+              end
+            />
+          )}
+          {showPage("instance.observability") && (
+            <SidebarNavItem
+              to={`${INSTANCE_SETTINGS_PATH_PREFIX}/observability`}
+              label="Observability"
+              icon={Activity}
               end
             />
           )}

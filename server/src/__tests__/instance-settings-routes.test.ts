@@ -49,11 +49,24 @@ const TX_SENTINEL = { __tx: true };
 function defaultTransactionImplementation(fn: (tx: unknown) => Promise<unknown>) {
   return fn(TX_SENTINEL);
 }
+
+function createMockSelectChain(result: unknown = []) {
+  const chain: any = {
+    from: vi.fn().mockReturnThis(),
+    where: vi.fn().mockReturnThis(),
+    groupBy: vi.fn().mockReturnThis(),
+    orderBy: vi.fn().mockReturnThis(),
+    then: (resolve: any, reject?: any) => Promise.resolve(result).then(resolve, reject),
+  };
+  return chain;
+}
+
 // Module-scoped (not rebuilt per createApp call) so a test can assert how
 // many times a request opened a transaction — the task-drain audit writes
 // for every company must share ONE transaction, not one each.
 const mockDb = {
   transaction: vi.fn(defaultTransactionImplementation),
+  select: vi.fn(() => createMockSelectChain([])),
 };
 
 describe("instance settings routes", () => {
@@ -86,6 +99,8 @@ describe("instance settings routes", () => {
     // next one.
     mockDb.transaction.mockReset();
     mockDb.transaction.mockImplementation(defaultTransactionImplementation);
+    mockDb.select.mockReset();
+    mockDb.select.mockImplementation(() => createMockSelectChain([]));
     mockInstanceSettingsService.get.mockReset();
     mockInstanceSettingsService.getGeneral.mockReset();
     mockInstanceSettingsService.getExperimental.mockReset();
@@ -1275,6 +1290,89 @@ describe("instance settings routes", () => {
       expect(negativeRes.status).toBe(400);
 
       expect(mockHeartbeatService.applyTaskDrain).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("GET /instance/observability", () => {
+    const adminActor = {
+      type: "board" as const,
+      source: "session" as const,
+      isInstanceAdmin: true,
+      userId: "user-admin",
+    };
+    const nonAdminActor = {
+      type: "board" as const,
+      source: "session" as const,
+      isInstanceAdmin: false,
+      userId: "user-non-admin",
+    };
+    const agentActor = {
+      type: "agent" as const,
+      source: "api_key" as const,
+      agentId: "agent-1",
+      companyId: "company-1",
+    };
+
+    it("rejects non-admin board actors with 403", async () => {
+      const app = await createApp(nonAdminActor);
+      const res = await request(app).get("/api/instance/observability");
+      expect(res.status).toBe(403);
+    });
+
+    it("rejects agent actors with 403", async () => {
+      const app = await createApp(agentActor);
+      const res = await request(app).get("/api/instance/observability");
+      expect(res.status).toBe(403);
+    });
+
+    it("allows instance admin and returns aggregated observability summary", async () => {
+      const now = new Date();
+      const mockCompanies = [
+        { id: "comp-1", name: "Company 1", status: "active", createdAt: now },
+      ];
+      const mockAgents = [
+        { companyId: "comp-1", agentCount: 2, activeAgentCount: 2 },
+      ];
+      const mockIssues = [
+        { companyId: "comp-1", count: 5 },
+      ];
+      const mockRuns = [
+        { companyId: "comp-1", runCount: 10, activeRunCount: 1, runtimeMs: 30000 },
+      ];
+      const mockCosts = [
+        {
+          companyId: "comp-1",
+          model: "claude-3-5-sonnet",
+          provider: "anthropic",
+          billingType: "subscription_included",
+          costCents: 0,
+          inputTokens: 10000,
+          cachedInputTokens: 0,
+          outputTokens: 2000,
+          subscriptionRunCount: 5,
+        },
+      ];
+
+      let selectCallIndex = 0;
+      mockDb.select.mockImplementation(() => {
+        const calls = [mockCompanies, mockAgents, mockIssues, mockRuns, mockCosts];
+        const data = calls[selectCallIndex++] ?? [];
+        return createMockSelectChain(data);
+      });
+
+      const app = await createApp(adminActor);
+      const res = await request(app).get("/api/instance/observability");
+      expect(res.status).toBe(200);
+      expect(res.body.totalCompanies).toBe(1);
+      expect(res.body.activeCompanies).toBe(1);
+      expect(res.body.totalAgents).toBe(2);
+      expect(res.body.totalIssues).toBe(5);
+      expect(res.body.totalRuns).toBe(10);
+      expect(res.body.activeRuns).toBe(1);
+      expect(res.body.totalRuntimeMs).toBe(30000);
+      expect(res.body.subscriptionTokens).toBe(12000);
+      expect(res.body.companies).toHaveLength(1);
+      expect(res.body.companies[0].companyId).toBe("comp-1");
     });
   });
 });

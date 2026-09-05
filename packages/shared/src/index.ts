@@ -1223,6 +1223,8 @@ export type {
   CostByAgentModel,
   CostWindowSpendRow,
   CostByProject,
+  CompanyComputeUsage,
+  InstanceObservabilitySummary,
   FinanceEvent,
   FinanceSummary,
   FinanceByBiller,
@@ -2728,3 +2730,11 @@ export {
   rewriteUrlHostToLoopback,
 } from "./runtime-exposure/loopback-bind.js";
 export { ACCOUNT_HANDLE_MAX_LENGTH, toAccountHandle } from "./account-handle.js";
+export {
+  type ModelPricing,
+  KNOWN_MODEL_PRICING,
+  DEFAULT_CLAUDE_PRICING,
+  resolveModelPricing,
+  simulateCostUsd,
+  simulateCostCents,
+} from "./pricing.js";

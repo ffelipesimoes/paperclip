@@ -25,7 +25,25 @@ import { api, detachInflightGet, type RequestOptions } from "./client";
 
 const COMPANIES_LIST_PATH = "/companies";
 
-export type CompanyStats = Record<string, { agentCount: number; issueCount: number }>;
+export type CompanyStats = Record<
+  string,
+  {
+    agentCount: number;
+    issueCount: number;
+    activeAgentCount?: number;
+    runCount?: number;
+    activeRunCount?: number;
+    runtimeMs?: number;
+    inputTokens?: number;
+    cachedInputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+    costCents?: number;
+    simulatedCostCents?: number;
+    subscriptionTokens?: number;
+    subscriptionRunCount?: number;
+  }
+>;
 
 /**
  * Import fields for a zip package upload: everything the JSON request carries

@@ -566,4 +566,53 @@ describe("parseClaudeStreamJson usage extraction", () => {
     });
     expect(parsed.usageBasis).toBe("per_run");
   });
+
+  it("supports snake_case keys in modelUsage", () => {
+    const parsed = parseClaudeStreamJson(
+      `${resultEvent({
+        modelUsage: {
+          "claude-3-5-sonnet": {
+            input_tokens: 150,
+            output_tokens: 250,
+            cache_read_input_tokens: 50,
+            cache_creation_input_tokens: 30,
+          },
+        },
+      })}\n`,
+    );
+    expect(parsed.usage).toEqual({
+      inputTokens: 180,
+      outputTokens: 250,
+      cachedInputTokens: 50,
+    });
+    expect(parsed.usageBasis).toBe("per_run");
+  });
+
+  it("captures tokens from assistant message events when result event is missing", () => {
+    const stream = [
+      JSON.stringify({ type: "system", subtype: "init", session_id: "sess-incomplete", model: "claude-3-5-sonnet" }),
+      JSON.stringify({
+        type: "assistant",
+        session_id: "sess-incomplete",
+        message: {
+          content: [{ type: "text", text: "Partial output..." }],
+          usage: {
+            input_tokens: 500,
+            output_tokens: 120,
+            cache_read_input_tokens: 100,
+          },
+        },
+      }),
+    ].join("\n");
+
+    const parsed = parseClaudeStreamJson(stream);
+    expect(parsed.usage).toEqual({
+      inputTokens: 500,
+      outputTokens: 120,
+      cachedInputTokens: 100,
+    });
+    expect(parsed.usageBasis).toBe("per_run");
+    expect(parsed.summary).toBe("Partial output...");
+  });
 });
+

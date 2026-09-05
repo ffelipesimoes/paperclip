@@ -933,4 +933,73 @@ describeEmbeddedPostgres("cost and finance aggregate overflow handling", () => {
     expect(byKindRow?.debitCents).toBe(4_000_000_000);
     expect(byKindRow?.netCents).toBe(4_000_000_000);
   });
+
+  it("calculates simulated costs and tracks subscription tokens for subscription runs", async () => {
+    const companyId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Subscription Sim Co",
+      issuePrefix: `S${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    const agent = await db
+      .insert(agents)
+      .values({
+        companyId,
+        name: "Claude Subscription Agent",
+        status: "idle",
+        adapterType: "claude_local",
+      })
+      .returning()
+      .then((rows) => rows[0]);
+
+    // Insert a subscription run event: $0 billed cost, 1,000,000 input tokens, 200,000 output tokens on Sonnet
+    await db.insert(costEvents).values({
+      companyId,
+      agentId: agent.id,
+      provider: "anthropic",
+      biller: "anthropic",
+      billingType: "subscription_included",
+      model: "claude-3-5-sonnet",
+      inputTokens: 1_000_000,
+      cachedInputTokens: 0,
+      outputTokens: 200_000,
+      costCents: 0,
+      occurredAt: new Date("2026-04-10T00:00:00.000Z"),
+    });
+
+    const range = {
+      from: new Date("2026-04-01T00:00:00.000Z"),
+      to: new Date("2026-04-30T23:59:59.999Z"),
+    };
+
+    const summary = await costs.summary(companyId, range);
+    expect(summary.spendCents).toBe(0);
+    expect(summary.subscriptionTokens).toBe(1_200_000);
+    // 1M input @ $3.00 + 200k output @ $15.00/M ($3.00) = $6.00 = 600 cents
+    expect(summary.simulatedCostCents).toBe(600);
+
+    const agentCosts = await costs.byAgent(companyId, range);
+    expect(agentCosts).toHaveLength(1);
+    expect(agentCosts[0].costCents).toBe(0);
+    expect(agentCosts[0].simulatedCostCents).toBe(600);
+
+    const providerCosts = await costs.byProvider(companyId, range);
+    expect(providerCosts).toHaveLength(1);
+    expect(providerCosts[0].costCents).toBe(0);
+    expect(providerCosts[0].simulatedCostCents).toBe(600);
+
+    const billerCosts = await costs.byBiller(companyId, range);
+    expect(billerCosts).toHaveLength(1);
+    expect(billerCosts[0].costCents).toBe(0);
+    expect(billerCosts[0].simulatedCostCents).toBe(600);
+
+    const agentModelCosts = await costs.byAgentModel(companyId, range);
+    expect(agentModelCosts).toHaveLength(1);
+    expect(agentModelCosts[0].costCents).toBe(0);
+    expect(agentModelCosts[0].simulatedCostCents).toBe(600);
+  });
 });
+

@@ -5,6 +5,7 @@ import type {
   PatchInstanceSettings,
   PatchInstanceGeneralSettings,
   PatchInstanceExperimentalSettings,
+  InstanceObservabilitySummary,
 } from "@paperclipai/shared";
 import { api } from "./client";
 
@@ -21,4 +22,6 @@ export const instanceSettingsApi = {
     api.get<InstanceExperimentalSettingsWithManaged>("/instance/settings/experimental"),
   updateExperimental: (patch: PatchInstanceExperimentalSettings) =>
     api.patch<InstanceExperimentalSettingsWithManaged>("/instance/settings/experimental", patch),
+  getObservability: (window?: string) =>
+    api.get<InstanceObservabilitySummary>(window ? `/instance/observability?window=${encodeURIComponent(window)}` : "/instance/observability"),
 };

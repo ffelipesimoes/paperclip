@@ -1,10 +1,21 @@
 import { Router, type Request } from "express";
+import { and, count, desc, gte, isNull, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
+import {
+  agents,
+  companies,
+  costEvents,
+  heartbeatRuns,
+  issues,
+} from "@paperclipai/db";
 import {
   patchInstanceSettingsSchema,
   patchInstanceExperimentalSettingsSchema,
   patchInstanceGeneralSettingsSchema,
   startTaskDrainRequestSchema,
+  simulateCostCents,
+  type CompanyComputeUsage,
+  type InstanceObservabilitySummary,
 } from "@paperclipai/shared";
 import { forbidden } from "../errors.js";
 import { isCloudManagedInstance } from "../services/cloud-instance.js";
@@ -401,6 +412,183 @@ export function instanceSettingsRoutes(db: Db) {
       return wasActive;
     });
     res.json({ wasActive });
+  });
+
+  router.get("/instance/observability", async (req, res) => {
+    assertCanManageInstanceSettings(req);
+    const windowParam = typeof req.query.window === "string" ? req.query.window.toLowerCase() : "all";
+    let since: Date | null = null;
+    if (windowParam === "24h") {
+      since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    } else if (windowParam === "7d") {
+      since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    } else if (windowParam === "30d") {
+      since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    }
+
+    const runConditions = [];
+    const costConditions = [];
+    if (since) {
+      runConditions.push(gte(heartbeatRuns.startedAt, since));
+      costConditions.push(gte(costEvents.occurredAt, since));
+    }
+
+    const [allCompanies, agentRows, issueRows, runRows, costRows] = await Promise.all([
+      db
+        .select({
+          id: companies.id,
+          name: companies.name,
+          issuePrefix: companies.issuePrefix,
+          status: companies.status,
+          createdAt: companies.createdAt,
+        })
+        .from(companies)
+        .orderBy(desc(companies.createdAt)),
+      db
+        .select({
+          companyId: agents.companyId,
+          agentCount: count(),
+          activeAgentCount: sql<number>`count(case when ${agents.status} not in ('paused', 'terminated', 'pending_approval') then 1 end)::int`,
+        })
+        .from(agents)
+        .groupBy(agents.companyId),
+      db
+        .select({
+          companyId: issues.companyId,
+          count: count(),
+        })
+        .from(issues)
+        .where(isNull(issues.hiddenAt))
+        .groupBy(issues.companyId),
+      db
+        .select({
+          companyId: heartbeatRuns.companyId,
+          runCount: sql<number>`count(*)::int`,
+          activeRunCount: sql<number>`count(case when ${heartbeatRuns.status} = 'running' then 1 end)::int`,
+          runtimeMs: sql<number>`coalesce(sum(case when ${heartbeatRuns.startedAt} is not null then extract(epoch from (coalesce(${heartbeatRuns.finishedAt}, now()) - ${heartbeatRuns.startedAt})) * 1000 else 0 end), 0)::double precision`,
+        })
+        .from(heartbeatRuns)
+        .where(runConditions.length > 0 ? and(...runConditions) : undefined)
+        .groupBy(heartbeatRuns.companyId),
+      db
+        .select({
+          companyId: costEvents.companyId,
+          model: costEvents.model,
+          provider: costEvents.provider,
+          billingType: costEvents.billingType,
+          costCents: sql<number>`coalesce(sum(${costEvents.costCents}), 0)::double precision`,
+          inputTokens: sql<number>`coalesce(sum(${costEvents.inputTokens}), 0)::double precision`,
+          cachedInputTokens: sql<number>`coalesce(sum(${costEvents.cachedInputTokens}), 0)::double precision`,
+          outputTokens: sql<number>`coalesce(sum(${costEvents.outputTokens}), 0)::double precision`,
+          subscriptionRunCount: sql<number>`count(distinct case when ${costEvents.billingType} in ('subscription_included', 'subscription_overage') then ${costEvents.heartbeatRunId} end)::int`,
+        })
+        .from(costEvents)
+        .where(costConditions.length > 0 ? and(...costConditions) : undefined)
+        .groupBy(costEvents.companyId, costEvents.model, costEvents.provider, costEvents.billingType),
+    ]);
+
+    const companyMap = new Map<string, CompanyComputeUsage>();
+    for (const c of allCompanies) {
+      companyMap.set(c.id, {
+        companyId: c.id,
+        companyName: c.name,
+        companyPrefix: c.issuePrefix,
+        companyStatus: c.status as "active" | "paused" | "archived",
+        createdAt: c.createdAt.toISOString(),
+        agentCount: 0,
+        activeAgentCount: 0,
+        issueCount: 0,
+        runCount: 0,
+        activeRunCount: 0,
+        runtimeMs: 0,
+        inputTokens: 0,
+        cachedInputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        costCents: 0,
+        simulatedCostCents: 0,
+        subscriptionTokens: 0,
+        subscriptionRunCount: 0,
+      });
+    }
+
+    for (const row of agentRows) {
+      const item = companyMap.get(row.companyId);
+      if (item) {
+        item.agentCount = row.agentCount;
+        item.activeAgentCount = Number(row.activeAgentCount ?? 0);
+      }
+    }
+
+    for (const row of issueRows) {
+      const item = companyMap.get(row.companyId);
+      if (item) {
+        item.issueCount = row.count;
+      }
+    }
+
+    for (const row of runRows) {
+      const item = companyMap.get(row.companyId);
+      if (item) {
+        item.runCount = Number(row.runCount ?? 0);
+        item.activeRunCount = Number(row.activeRunCount ?? 0);
+        item.runtimeMs = Number(row.runtimeMs ?? 0);
+      }
+    }
+
+    for (const row of costRows) {
+      const item = companyMap.get(row.companyId);
+      if (item) {
+        const inTok = Number(row.inputTokens ?? 0);
+        const cacheTok = Number(row.cachedInputTokens ?? 0);
+        const outTok = Number(row.outputTokens ?? 0);
+        const costC = Number(row.costCents ?? 0);
+        const simC = simulateCostCents({
+          model: row.model,
+          provider: row.provider,
+          inputTokens: inTok,
+          cachedInputTokens: cacheTok,
+          outputTokens: outTok,
+        });
+
+        item.inputTokens += inTok;
+        item.cachedInputTokens += cacheTok;
+        item.outputTokens += outTok;
+        item.totalTokens += inTok + cacheTok + outTok;
+        item.costCents += costC;
+        item.simulatedCostCents += simC;
+        if (row.billingType !== "metered_api") {
+          item.subscriptionTokens += inTok + cacheTok + outTok;
+        }
+        item.subscriptionRunCount += Number(row.subscriptionRunCount ?? 0);
+      }
+    }
+
+    const companyList = Array.from(companyMap.values());
+    companyList.sort((a, b) => b.totalTokens - a.totalTokens || b.runtimeMs - a.runtimeMs);
+
+    const summary: InstanceObservabilitySummary = {
+      window: windowParam,
+      totalCompanies: allCompanies.length,
+      activeCompanies: allCompanies.filter((c) => c.status === "active").length,
+      totalAgents: companyList.reduce((acc, c) => acc + c.agentCount, 0),
+      activeAgents: companyList.reduce((acc, c) => acc + c.activeAgentCount, 0),
+      totalIssues: companyList.reduce((acc, c) => acc + c.issueCount, 0),
+      totalRuns: companyList.reduce((acc, c) => acc + c.runCount, 0),
+      activeRuns: companyList.reduce((acc, c) => acc + c.activeRunCount, 0),
+      totalRuntimeMs: companyList.reduce((acc, c) => acc + c.runtimeMs, 0),
+      inputTokens: companyList.reduce((acc, c) => acc + c.inputTokens, 0),
+      cachedInputTokens: companyList.reduce((acc, c) => acc + c.cachedInputTokens, 0),
+      outputTokens: companyList.reduce((acc, c) => acc + c.outputTokens, 0),
+      totalTokens: companyList.reduce((acc, c) => acc + c.totalTokens, 0),
+      billedCostCents: companyList.reduce((acc, c) => acc + c.costCents, 0),
+      simulatedCostCents: companyList.reduce((acc, c) => acc + c.simulatedCostCents, 0),
+      subscriptionTokens: companyList.reduce((acc, c) => acc + c.subscriptionTokens, 0),
+      subscriptionRunCount: companyList.reduce((acc, c) => acc + c.subscriptionRunCount, 0),
+      companies: companyList,
+    };
+
+    res.json(summary);
   });
 
   return router;

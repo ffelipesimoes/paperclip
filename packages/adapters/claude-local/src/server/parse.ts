@@ -46,9 +46,9 @@ export function claudeModelUsageTotals(modelUsage: unknown): UsageSummary | null
     const entry = parseObject(value);
     if (Object.keys(entry).length === 0) continue;
     sawEntry = true;
-    inputTokens += asNumber(entry.inputTokens, 0) + asNumber(entry.cacheCreationInputTokens, 0);
-    outputTokens += asNumber(entry.outputTokens, 0);
-    cachedInputTokens += asNumber(entry.cacheReadInputTokens, 0);
+    inputTokens += asNumber(entry.inputTokens ?? entry.input_tokens, 0) + asNumber(entry.cacheCreationInputTokens ?? entry.cache_creation_input_tokens, 0);
+    outputTokens += asNumber(entry.outputTokens ?? entry.output_tokens, 0);
+    cachedInputTokens += asNumber(entry.cacheReadInputTokens ?? entry.cache_read_input_tokens, 0);
   }
   if (!sawEntry) return null;
   return { inputTokens, outputTokens, cachedInputTokens };
@@ -59,6 +59,10 @@ export function parseClaudeStreamJson(stdout: string) {
   let model = "";
   let finalResult: Record<string, unknown> | null = null;
   const assistantTexts: string[] = [];
+  let assistantInputTokens = 0;
+  let assistantOutputTokens = 0;
+  let assistantCachedInputTokens = 0;
+  let sawAssistantUsage = false;
 
   for (const rawLine of stdout.split(/\r?\n/)) {
     const line = rawLine.trim();
@@ -76,6 +80,16 @@ export function parseClaudeStreamJson(stdout: string) {
     if (type === "assistant") {
       sessionId = asString(event.session_id, sessionId ?? "") || sessionId;
       const message = parseObject(event.message);
+      const usage = parseObject(message.usage);
+      const inTok = asNumber(usage.input_tokens ?? usage.inputTokens, 0) + asNumber(usage.cache_creation_input_tokens ?? usage.cacheCreationInputTokens, 0);
+      const outTok = asNumber(usage.output_tokens ?? usage.outputTokens, 0);
+      const cacheTok = asNumber(usage.cache_read_input_tokens ?? usage.cacheReadInputTokens, 0);
+      if (inTok > 0 || outTok > 0 || cacheTok > 0) {
+        sawAssistantUsage = true;
+        assistantInputTokens += inTok;
+        assistantOutputTokens += outTok;
+        assistantCachedInputTokens += cacheTok;
+      }
       const content = Array.isArray(message.content) ? message.content : [];
       for (const entry of content) {
         if (typeof entry !== "object" || entry === null || Array.isArray(entry)) continue;
@@ -94,13 +108,21 @@ export function parseClaudeStreamJson(stdout: string) {
     }
   }
 
+  const fallbackUsage: UsageSummary | null = sawAssistantUsage
+    ? {
+        inputTokens: assistantInputTokens,
+        cachedInputTokens: assistantCachedInputTokens,
+        outputTokens: assistantOutputTokens,
+      }
+    : null;
+
   if (!finalResult) {
     return {
       sessionId,
       model,
       costUsd: null as number | null,
-      usage: null as UsageSummary | null,
-      usageBasis: null as "per_run" | null,
+      usage: fallbackUsage,
+      usageBasis: fallbackUsage ? ("per_run" as const) : null,
       summary: assistantTexts.join("\n\n").trim(),
       resultJson: null as Record<string, unknown> | null,
     };
@@ -108,10 +130,15 @@ export function parseClaudeStreamJson(stdout: string) {
 
   const modelUsageTotals = claudeModelUsageTotals(finalResult.modelUsage);
   const usageObj = parseObject(finalResult.usage);
-  const usage: UsageSummary = modelUsageTotals ?? {
-    inputTokens: asNumber(usageObj.input_tokens, 0),
-    cachedInputTokens: asNumber(usageObj.cache_read_input_tokens, 0),
-    outputTokens: asNumber(usageObj.output_tokens, 0),
+  const resultUsage = (usageObj.input_tokens !== undefined || usageObj.output_tokens !== undefined || usageObj.inputTokens !== undefined || usageObj.outputTokens !== undefined) ? {
+    inputTokens: asNumber(usageObj.input_tokens ?? usageObj.inputTokens, 0) + asNumber(usageObj.cache_creation_input_tokens ?? usageObj.cacheCreationInputTokens, 0),
+    cachedInputTokens: asNumber(usageObj.cache_read_input_tokens ?? usageObj.cacheReadInputTokens, 0),
+    outputTokens: asNumber(usageObj.output_tokens ?? usageObj.outputTokens, 0),
+  } : null;
+  const usage: UsageSummary = modelUsageTotals ?? resultUsage ?? fallbackUsage ?? {
+    inputTokens: 0,
+    cachedInputTokens: 0,
+    outputTokens: 0,
   };
   const costRaw = finalResult.total_cost_usd;
   const costUsd = typeof costRaw === "number" && Number.isFinite(costRaw) ? costRaw : null;
