@@ -41,7 +41,26 @@ function isAlreadyExistsError(error: unknown): boolean {
   return code === "EEXIST" || code === "ENOTEMPTY";
 }
 
-function sanitizeRemoteClaudeSettings(raw: string): string {
+export interface ClaudeConfigSanitizationOptions {
+  enableRtk?: boolean;
+}
+
+export function buildRtkBashHook() {
+  return {
+    matcher: "Bash",
+    hooks: [
+      {
+        type: "command",
+        command: "if command -v rtk >/dev/null 2>&1; then rtk hook claude; fi",
+      },
+    ],
+  };
+}
+
+export function sanitizeRemoteClaudeSettings(
+  raw: string,
+  options?: ClaudeConfigSanitizationOptions,
+): string {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -55,24 +74,55 @@ function sanitizeRemoteClaudeSettings(raw: string): string {
 
   const settings = { ...(parsed as Record<string, unknown>) };
   settings.permissions = { defaultMode: "default" };
-  delete settings.hooks;
   delete settings.mcpServers;
   delete settings.permissionMode;
   delete settings.skipDangerousModePermissionPrompt;
+
+  const enableRtk =
+    options?.enableRtk ??
+    process.env.PAPERCLIP_RTK_ENABLED === "true";
+
+  if (enableRtk) {
+    settings.hooks = {
+      PreToolUse: [buildRtkBashHook()],
+    };
+  } else {
+    delete settings.hooks;
+  }
+
   return JSON.stringify(settings);
 }
 
-async function collectSeedFiles(sourceDir: string): Promise<SeedFile[]> {
+async function collectSeedFiles(
+  sourceDir: string,
+  options?: ClaudeConfigSanitizationOptions,
+): Promise<SeedFile[]> {
   const files: SeedFile[] = [];
+  let foundSettings = false;
   for (const name of SEEDED_SHARED_FILES) {
     const sourcePath = path.join(sourceDir, name);
     if (!(await pathExists(sourcePath))) continue;
+    if (name === "settings.json") foundSettings = true;
     const rawContents = await fs.readFile(sourcePath);
     const contents = name === "settings.json"
-      ? Buffer.from(sanitizeRemoteClaudeSettings(rawContents.toString("utf8")), "utf8")
+      ? Buffer.from(sanitizeRemoteClaudeSettings(rawContents.toString("utf8"), options), "utf8")
       : rawContents;
     files.push({ name, sourcePath, contents });
   }
+
+  const enableRtk =
+    options?.enableRtk ??
+    process.env.PAPERCLIP_RTK_ENABLED === "true";
+
+  if (!foundSettings && enableRtk) {
+    const defaultSettings = sanitizeRemoteClaudeSettings("{}", options);
+    files.push({
+      name: "settings.json",
+      sourcePath: path.join(sourceDir, "settings.json"),
+      contents: Buffer.from(defaultSettings, "utf8"),
+    });
+  }
+
   return files;
 }
 
@@ -187,6 +237,7 @@ export async function prepareClaudeConfigSeed(
   env: NodeJS.ProcessEnv,
   onLog: AdapterExecutionContext["onLog"],
   companyId?: string,
+  options?: ClaudeConfigSanitizationOptions,
 ): Promise<string> {
   const sourceDir = resolveSharedClaudeConfigDir(env);
   const targetRootDir = resolveManagedClaudeConfigSeedDir(env, companyId);
@@ -195,7 +246,7 @@ export async function prepareClaudeConfigSeed(
     return targetRootDir;
   }
 
-  const copiedFiles = await collectSeedFiles(sourceDir);
+  const copiedFiles = await collectSeedFiles(sourceDir, options);
   const snapshotKey = await buildSeedSnapshotKey(copiedFiles);
   const targetDir = await materializeSeedSnapshot({
     rootDir: targetRootDir,
@@ -373,3 +424,67 @@ export async function prepareSandboxClaudeProbeRuntime(input: {
 
   return checks;
 }
+
+export async function ensureWorkspaceClaudeRtkSettings(
+  workspaceDir: string,
+  onLog?: AdapterExecutionContext["onLog"],
+): Promise<void> {
+  if (!workspaceDir || workspaceDir.trim().length === 0) return;
+  const claudeDir = path.join(workspaceDir, ".claude");
+  const localSettingsPath = path.join(claudeDir, "settings.local.json");
+  try {
+    let existingSettings: Record<string, unknown> = {};
+    if (await pathExists(localSettingsPath)) {
+      try {
+        const raw = await fs.readFile(localSettingsPath, "utf8");
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          existingSettings = parsed as Record<string, unknown>;
+        }
+      } catch {
+        existingSettings = {};
+      }
+    } else {
+      await fs.mkdir(claudeDir, { recursive: true });
+    }
+
+    const hooks = (existingSettings.hooks && typeof existingSettings.hooks === "object" && !Array.isArray(existingSettings.hooks))
+      ? { ...(existingSettings.hooks as Record<string, unknown>) }
+      : {};
+
+    const preToolUse = Array.isArray(hooks.PreToolUse) ? [...hooks.PreToolUse] : [];
+    const rtkHook = buildRtkBashHook();
+    const hasRtkHook = preToolUse.some((item) => {
+      if (!item || typeof item !== "object") return false;
+      const rec = item as Record<string, unknown>;
+      if (rec.matcher !== "Bash") return false;
+      if (Array.isArray(rec.hooks)) {
+        return rec.hooks.some(
+          (h: unknown) => h && typeof h === "object" && (h as Record<string, unknown>).command?.toString().includes("rtk"),
+        );
+      }
+      return rec.command?.toString().includes("rtk");
+    });
+
+    if (!hasRtkHook) {
+      preToolUse.push(rtkHook);
+      hooks.PreToolUse = preToolUse;
+      existingSettings.hooks = hooks;
+      await fs.writeFile(localSettingsPath, JSON.stringify(existingSettings, null, 2), "utf8");
+      if (onLog) {
+        await onLog(
+          "stdout",
+          `[paperclip] Configured RTK PreToolUse hook in ${localSettingsPath} for Bash token compression.\n`,
+        );
+      }
+    }
+  } catch (err) {
+    if (onLog) {
+      await onLog(
+        "stderr",
+        `[paperclip] Warning: Could not configure RTK workspace hook in ${localSettingsPath}: ${String(err)}\n`,
+      );
+    }
+  }
+}
+

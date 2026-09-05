@@ -669,6 +669,7 @@ export interface CreateConfigValues {
   claudeAcpNonInteractivePermissions?: "deny" | "fail";
   claudeAcpStateDir?: string;
   claudeAcpWarmHandleIdleMs?: number;
+  enableRtk?: boolean;
   codexEngine?: "auto" | "cli" | "acp";
   codexAcpAgentCommand?: string;
   codexAcpMode?: "persistent" | "oneshot";

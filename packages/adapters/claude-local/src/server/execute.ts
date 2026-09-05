@@ -79,6 +79,7 @@ import {
   isClaudeModelNotFoundError,
 } from "./parse.js";
 import {
+  ensureWorkspaceClaudeRtkSettings,
   materializeRemoteClaudeConfig,
   prepareClaudeConfigSeed,
   resolveManagedClaudeRuntimeStateDir,
@@ -675,12 +676,16 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       `[paperclip] Confining Claude with ${scopes} scope.\n`,
     );
   }
+  const enableRtk = asBoolean(config.enableRtk, false) || process.env.PAPERCLIP_RTK_ENABLED === "true";
+  if (enableRtk && !executionTargetIsRemote) {
+    await ensureWorkspaceClaudeRtkSettings(effectiveExecutionCwd, onLog);
+  }
   const useManagedRemoteClaudeConfig =
     executionTargetIsRemote &&
     adapterExecutionTargetUsesManagedHome(executionTarget) &&
     !hasExplicitClaudeConfigDir;
   const claudeConfigSeedDir = useManagedRemoteClaudeConfig
-    ? await prepareClaudeConfigSeed(process.env, onLog, agent.companyId)
+    ? await prepareClaudeConfigSeed(process.env, onLog, agent.companyId, { enableRtk })
     : null;
   const preparedExecutionTargetRuntime = executionTargetIsRemote
     ? await (async () => {

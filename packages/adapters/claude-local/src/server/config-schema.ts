@@ -68,6 +68,13 @@ export function getConfigSchema(): AdapterConfigSchema {
         hint: "Defaults to 0, which closes the ACP process after each run while retaining persistent session state.",
         meta: acpVisible,
       },
+      {
+        key: "enableRtk",
+        label: "Enable RTK (Rust Token Killer)",
+        type: "toggle",
+        default: false,
+        hint: "Intercepts and filters terminal command outputs (git status, test runners, linters) using RTK to reduce token consumption by 60-90%. Requires rtk on host or sandbox.",
+      },
     ],
   };
 }

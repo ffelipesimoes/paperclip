@@ -26,7 +26,7 @@ Esta RFC detalha a implementação das melhorias organizadas em **6 Pilares Téc
 ## 2. Diagnóstico Detalhado e Arquivos Afetados
 
 ### 2.1. Write-Amplification no Middleware de Autenticação
-* **Localização:** [`server/src/middleware/auth.ts:341-343`](file:///Users/felipesimoes/DEV/paperclip/server/src/middleware/auth.ts#L341-L343) e [`server/src/services/board-auth.ts:149-151`](file:///Users/felipesimoes/DEV/paperclip/server/src/services/board-auth.ts#L149-L151)
+* **Localização:** [`server/src/middleware/auth.ts:341-343`](../../server/src/middleware/auth.ts#L341-L343) e [`server/src/services/board-auth.ts:149-151`](../../server/src/services/board-auth.ts#L149-L151)
 * **Mecanismo:** A cada chamada à API contendo `Bearer <token>`, executa-se síncronamente:
   ```ts
   await db.update(agentApiKeys).set({ lastUsedAt: new Date() }).where(eq(agentApiKeys.id, key.id));
@@ -35,15 +35,15 @@ Esta RFC detalha a implementação das melhorias organizadas em **6 Pilares Téc
 * **Impacto:** Gera writes no banco em rotas de leitura pura (`GET`), sobrecarregando o WAL e concorrendo com transações de negócio.
 
 ### 2.2. Query Fan-out e Agregações em `issues.service.list`
-* **Localização:** [`server/src/services/issues.ts:5567-5609`](file:///Users/felipesimoes/DEV/paperclip/server/src/services/issues.ts#L5567-L5609)
+* **Localização:** [`server/src/services/issues.ts:5567-5609`](../../server/src/services/issues.ts#L5567-L5609)
 * **Mecanismo:** Ao listar uma página de issues, executam-se dezenas de queries em paralelo, incluindo duas consultas analíticas pesadas com `MAX(createdAt)` sobre `issue_comments` e `activity_log` para calcular o `last_activity_at`.
 
 ### 2.3. Carga Cíclica no Scheduler (`runRetentionSweep`)
-* **Localização:** [`server/src/index.ts:1177-1193`](file:///Users/felipesimoes/DEV/paperclip/server/src/index.ts#L1177-L1193) e [`server/src/services/decision-retention.ts:343`](file:///Users/felipesimoes/DEV/paperclip/server/src/services/decision-retention.ts#L343)
+* **Localização:** [`server/src/index.ts:1177-1193`](../../server/src/index.ts#L1177-L1193) e [`server/src/services/decision-retention.ts:343`](../../server/src/services/decision-retention.ts#L343)
 * **Mecanismo:** O cron interno chama `attentionService.list(company.id, { all: true, allowUnscopedAll: true })` a cada 30 segundos para cada empresa ativa. A função percorre mais de 15 tabelas e reconstrói o feed inteiro, mesmo quando nada mudou.
 
 ### 2.4. Invalidação de Índices por `COALESCE` em JSONB
-* **Localização:** [`server/src/services/issues.ts:2865-2875`](file:///Users/felipesimoes/DEV/paperclip/server/src/services/issues.ts#L2865-L2875)
+* **Localização:** [`server/src/services/issues.ts:2865-2875`](../../server/src/services/issues.ts#L2865-L2875)
 * **Mecanismo:**
   ```ts
   inArray(
@@ -54,14 +54,14 @@ Esta RFC detalha a implementação das melhorias organizadas em **6 Pilares Téc
   O PostgreSQL não utiliza o índice de expressão `(company_id, (context_snapshot ->> 'issueId'))` devido ao encapsulamento em `COALESCE(...)`.
 
 ### 2.5. Índices Ausentes em Tabelas com Volume Expressivo
-* **`activity_log`** ([`activity_log.ts`](file:///Users/felipesimoes/DEV/paperclip/packages/db/src/schema/activity_log.ts)): Sem índice cobrindo `(company_id, entity_type, entity_id, created_at DESC)`.
-* **`cost_events`** ([`cost_events.ts`](file:///Users/felipesimoes/DEV/paperclip/packages/db/src/schema/cost_events.ts)): Sem índice cobrindo `(company_id, project_id, occurred_at)`.
-* **`issue_thread_interactions`** ([`issue_thread_interactions.ts`](file:///Users/felipesimoes/DEV/paperclip/packages/db/src/schema/issue_thread_interactions.ts)): Sem índice em `(company_id, status, updated_at DESC)`.
-* **`decisions`** ([`decisions.ts`](file:///Users/felipesimoes/DEV/paperclip/packages/db/src/schema/decisions.ts)): Sem índice em `(company_id, status, updated_at DESC)`.
+* **`activity_log`** ([`activity_log.ts`](../../packages/db/src/schema/activity_log.ts)): Sem índice cobrindo `(company_id, entity_type, entity_id, created_at DESC)`.
+* **`cost_events`** ([`cost_events.ts`](../../packages/db/src/schema/cost_events.ts)): Sem índice cobrindo `(company_id, project_id, occurred_at)`.
+* **`issue_thread_interactions`** ([`issue_thread_interactions.ts`](../../packages/db/src/schema/issue_thread_interactions.ts)): Sem índice em `(company_id, status, updated_at DESC)`.
+* **`decisions`** ([`decisions.ts`](../../packages/db/src/schema/decisions.ts)): Sem índice em `(company_id, status, updated_at DESC)`.
 
 ### 2.6. Consultas N+1 e Cascata Sequencial
-* **`budgets.ts`** ([`budgets.ts:630-647`](file:///Users/felipesimoes/DEV/paperclip/server/src/services/budgets.ts#L630-L647)): `rows.map(buildPolicySummary)` executando queries individuais de escopo e agregação de custo por política.
-* **`dashboard.ts`** ([`dashboard.ts:30-186`](file:///Users/felipesimoes/DEV/paperclip/server/src/services/dashboard.ts#L30-L186)): 7 consultas pesadas encadeadas em sequência com `await`, somando as latências individuais.
+* **`budgets.ts`** ([`budgets.ts:630-647`](../../server/src/services/budgets.ts#L630-L647)): `rows.map(buildPolicySummary)` executando queries individuais de escopo e agregação de custo por política.
+* **`dashboard.ts`** ([`dashboard.ts:30-186`](../../server/src/services/dashboard.ts#L30-L186)): 7 consultas pesadas encadeadas em sequência com `await`, somando as latências individuais.
 
 ---
 
@@ -69,7 +69,7 @@ Esta RFC detalha a implementação das melhorias organizadas em **6 Pilares Téc
 
 ### Pilar 1: Debounce de Escritas de Auth e Cache L1 (Baixo Risco)
 1. **Buffer em Memória para `lastUsedAt`:**
-   * **Arquivos:** [`server/src/middleware/auth.ts:341-343`](file:///Users/felipesimoes/DEV/paperclip/server/src/middleware/auth.ts#L341-L343) e [`server/src/services/board-auth.ts:150`](file:///Users/felipesimoes/DEV/paperclip/server/src/services/board-auth.ts#L150)
+   * **Arquivos:** [`server/src/middleware/auth.ts:341-343`](../../server/src/middleware/auth.ts#L341-L343) e [`server/src/services/board-auth.ts:150`](../../server/src/services/board-auth.ts#L150)
    * **Implementação:** Substituir o `await db.update(...).set({ lastUsedAt })` síncrono por um buffer em memória (`Map<keyId, number>`).
    * **Estratégia:** Gravar no banco apenas se o intervalo desde a última gravação for superior a **5 minutos** (300.000 ms), ou disparar em lote em background a cada 60s. O endpoint de API não aguarda essa gravação.
 2. **Cache L1 em Memória para Metadados Estáticos:**
@@ -117,7 +117,7 @@ Esta RFC detalha a implementação das melhorias organizadas em **6 Pilares Téc
        ```
 2. **Geração e Aplicação de Migração Concorrente:**
    * Rodar `pnpm db:generate`.
-   * Ajustar o arquivo de migração para utilizar `CREATE INDEX CONCURRENTLY` fora de bloco de transação, respeitando a checklist de migrações de [`doc/DATABASE.md`](file:///Users/felipesimoes/DEV/paperclip/doc/DATABASE.md#L157-L169).
+   * Ajustar o arquivo de migração para utilizar `CREATE INDEX CONCURRENTLY` fora de bloco de transação, respeitando a checklist de migrações de [`doc/DATABASE.md`](../../doc/DATABASE.md#L157-L169).
 
 ---
 
@@ -133,7 +133,7 @@ Esta RFC detalha a implementação das melhorias organizadas em **6 Pilares Téc
      ```
    * Se o resultado for `0`, confirma-se que a semântica de `COALESCE` pode ser substituída com segurança por um predicado `OR`.
 2. **Reescrita em `server/src/services/issues.ts:2865-2875`:**
-   * Seguir o precedente idêntico já consolidado em [`task-watchdogs.ts:963-966`](file:///Users/felipesimoes/DEV/paperclip/server/src/services/task-watchdogs.ts#L963-L966):
+   * Seguir o precedente idêntico já consolidado em [`task-watchdogs.ts:963-966`](../../server/src/services/task-watchdogs.ts#L963-L966):
      ```ts
      or(
        inArray(sql`${heartbeatRuns.contextSnapshot}->>'issueId'`, reviewIds),
@@ -159,14 +159,14 @@ Esta RFC detalha a implementação das melhorias organizadas em **6 Pilares Téc
 * **Backfill:** Script de migração para preencher `last_activity_at = coalesce(updated_at, created_at)` nas linhas históricas existentes.
 
 #### 4b. Batching em `budgets.ts` (Baixo Risco)
-* **Arquivo:** [`server/src/services/budgets.ts:629`](file:///Users/felipesimoes/DEV/paperclip/server/src/services/budgets.ts#L629) (`overview`)
+* **Arquivo:** [`server/src/services/budgets.ts:629`](../../server/src/services/budgets.ts#L629) (`overview`)
 * **Implementação:** Substituir `Promise.all(rows.map(buildPolicySummary))` por:
   1. Extração dos IDs únicos de agentes e projetos referenciados nas políticas.
   2. Duas queries em lote: `SELECT FROM agents WHERE id IN (...)` e `SELECT FROM projects WHERE id IN (...)`.
   3. Uma query agregada de custo utilizando `GROUP BY agent_id` e `GROUP BY project_id` cobrindo o período da janela.
 
 #### 4c. Paralelização de Queries em `dashboard.ts` (Baixo Risco)
-* **Arquivo:** [`server/src/services/dashboard.ts:29-187`](file:///Users/felipesimoes/DEV/paperclip/server/src/services/dashboard.ts#L29-L187) (`summary`)
+* **Arquivo:** [`server/src/services/dashboard.ts:29-187`](../../server/src/services/dashboard.ts#L29-L187) (`summary`)
 * **Implementação:**
   * Manter a query de `companies` primeiro (necessária para lançar 404 se a empresa não existir).
   * Agrupar todas as queries subsequentes independentes em um único `Promise.all`:
@@ -186,7 +186,7 @@ Esta RFC detalha a implementação das melhorias organizadas em **6 Pilares Téc
 ### Pilar 5: Scheduler Incremental Redesenhado e Governança de Transações
 
 #### 5a. Redesenho da Varredura Incremental de Retenção
-* **Arquivos:** [`server/src/index.ts:1176`](file:///Users/felipesimoes/DEV/paperclip/server/src/index.ts#L1176) (`runRetentionSweep`) e [`server/src/services/decision-retention.ts:343`](file:///Users/felipesimoes/DEV/paperclip/server/src/services/decision-retention.ts#L343) (`autoArchive`)
+* **Arquivos:** [`server/src/index.ts:1176`](../../server/src/index.ts#L1176) (`runRetentionSweep`) e [`server/src/services/decision-retention.ts:343`](../../server/src/services/decision-retention.ts#L343) (`autoArchive`)
 * **Ajuste Importante:** A tabela `decision_retention` **não** possui colunas `status` ou `expires_at`. Ela rastreia itens por `source_activity_at`, `archived_at` e a flag `keep`.
 * **Fluxo Redesenhado:**
   1. O cron consulta `decision_retention` apenas para identificar itens candidatos:
@@ -203,7 +203,7 @@ Esta RFC detalha a implementação das melhorias organizadas em **6 Pilares Téc
   3. Isso preserva 100% da integridade da lógica de `autoArchive` e elimina a reconstrução pesada de dezenas de tabelas a cada 30 segundos.
 
 #### 5b. Governança da Transação em `decisions.ts` (Decisão de Arquitetura)
-* **Arquivo:** [`server/src/routes/decisions.ts:79-83`](file:///Users/felipesimoes/DEV/paperclip/server/src/routes/decisions.ts#L79-L83)
+* **Arquivo:** [`server/src/routes/decisions.ts:79-83`](../../server/src/routes/decisions.ts#L79-L83)
 * **Diretriz:** **Manter** o bloco `db.transaction(..., { isolationLevel: "repeatable read" })`.
 * **Justificativa:** O nível `repeatable read` é estritamente necessário para garantir que o snapshot do feed permaneça consistente durante o cálculo de integridade do `manifestHash`. Remover essa transação introduziria condições de corrida.
 * **Estratégia de Otimização:** O alívio do tempo de retenção do lock será obtido tornando a consulta do `attentionService.list()` ordens de grandeza mais rápida através dos Pilares 2 e 3, e não pela redução do nível de isolamento.
@@ -217,7 +217,7 @@ Esta RFC detalha a implementação das melhorias organizadas em **6 Pilares Téc
   DATABASE_IDLE_TIMEOUT_SECONDS=60
   DATABASE_CONNECT_TIMEOUT_SECONDS=10
   ```
-* As opções já são suportadas nativamente por [`packages/db/src/client.ts:89-100`](file:///Users/felipesimoes/DEV/paperclip/packages/db/src/client.ts#L89-L100).
+* As opções já são suportadas nativamente por [`packages/db/src/client.ts:89-100`](../../packages/db/src/client.ts#L89-L100).
 
 ---
 
