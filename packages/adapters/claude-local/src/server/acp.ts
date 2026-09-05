@@ -38,6 +38,7 @@ import {
   parseObject,
 } from "@paperclipai/adapter-utils/server-utils";
 import {
+  ensureWorkspaceClaudeRtkSettings,
   materializeRemoteClaudeConfig,
   prepareClaudeConfigSeed,
   prepareSandboxClaudeProbeRuntime,
@@ -268,7 +269,8 @@ async function prepareClaudeRemoteManagedHome(
 
   // Content-addressed sanitized seed (managed cache under the instance root, not
   // a temp dir — reused across runs, so no teardown cleanup).
-  const claudeConfigSeedDir = await prepareClaudeConfigSeed(process.env, onLog, input.companyId);
+  const enableRtk = asBoolean(input.config.enableRtk, false) || process.env.PAPERCLIP_RTK_ENABLED === "true";
+  const claudeConfigSeedDir = await prepareClaudeConfigSeed(process.env, onLog, input.companyId, { enableRtk });
   const stagedRuntime = await input.stage([
     { key: "config-seed", localDir: claudeConfigSeedDir, followSymlinks: true },
   ]);
@@ -343,6 +345,10 @@ export function mapClaudeAcpAuthErrorCode(
 export function createClaudeAcpExecutor(options: ClaudeAcpExecutorOptions = {}): ClaudeAcpExecutor {
   let executor: ClaudeAcpExecutor | null = null;
   return async (ctx) => {
+    const enableRtk = asBoolean(ctx.config.enableRtk, false) || process.env.PAPERCLIP_RTK_ENABLED === "true";
+    if (enableRtk && typeof ctx.config.cwd === "string" && ctx.config.cwd.trim().length > 0) {
+      await ensureWorkspaceClaudeRtkSettings(ctx.config.cwd.trim(), ctx.onLog).catch(() => undefined);
+    }
     let currentExecutor = executor;
     if (!currentExecutor) {
       const { createAcpxEngineExecutor } = await import("@paperclipai/adapter-utils/acpx-engine/execute");

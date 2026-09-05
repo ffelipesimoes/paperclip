@@ -77,4 +77,9 @@ describe("buildClaudeLocalConfig", () => {
       FLAG: { type: "plain", value: "on" },
     });
   });
+
+  it("persists enableRtk flag when set", () => {
+    const config = buildClaudeLocalConfig(makeValues({ enableRtk: true }));
+    expect(config.enableRtk).toBe(true);
+  });
 });

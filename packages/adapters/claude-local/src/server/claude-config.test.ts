@@ -22,7 +22,13 @@ vi.mock("@paperclipai/adapter-utils/execution-target", async () => {
   };
 });
 
-import { prepareClaudeConfigSeed, prepareSandboxClaudeProbeRuntime } from "./claude-config.js";
+import {
+  buildRtkBashHook,
+  ensureWorkspaceClaudeRtkSettings,
+  prepareClaudeConfigSeed,
+  prepareSandboxClaudeProbeRuntime,
+  sanitizeRemoteClaudeSettings,
+} from "./claude-config.js";
 
 describe("prepareClaudeConfigSeed", () => {
   const cleanupDirs: string[] = [];
@@ -127,6 +133,98 @@ describe("prepareClaudeConfigSeed", () => {
       .rejects.toMatchObject({ code: "ENOENT" });
     await expect(fs.readFile(path.join(seedDir, "CLAUDE.md"), "utf8"))
       .resolves.toBe("local instructions");
+  });
+
+  it("injects managed RTK Bash hook into seeded settings when enableRtk is true", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-claude-config-rtk-"));
+    cleanupDirs.push(root);
+    const sourceDir = path.join(root, "claude-source");
+    await fs.mkdir(sourceDir, { recursive: true });
+    await fs.writeFile(path.join(sourceDir, "settings.json"), JSON.stringify({
+      theme: "light",
+      hooks: { PreToolUse: [{ matcher: "custom" }] },
+    }), "utf8");
+
+    const onLog = vi.fn(async () => {});
+    const env = createEnv(root, sourceDir);
+    const seedDir = await prepareClaudeConfigSeed(env, onLog, "company-1", { enableRtk: true });
+    const remoteSettings = JSON.parse(await fs.readFile(path.join(seedDir, "settings.json"), "utf8"));
+
+    expect(remoteSettings.permissions).toEqual({ defaultMode: "default" });
+    expect(remoteSettings.hooks).toEqual({
+      PreToolUse: [buildRtkBashHook()],
+    });
+    expect(remoteSettings.hooks.PreToolUse[0].hooks[0].command).toContain("rtk hook claude");
+  });
+
+  it("synthesizes settings.json with RTK hook when settings.json is missing and enableRtk is true", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-claude-config-synth-"));
+    cleanupDirs.push(root);
+    const sourceDir = path.join(root, "claude-source");
+    await fs.mkdir(sourceDir, { recursive: true });
+    await fs.writeFile(path.join(sourceDir, "CLAUDE.md"), "instructions", "utf8");
+
+    const onLog = vi.fn(async () => {});
+    const env = createEnv(root, sourceDir);
+    const seedDir = await prepareClaudeConfigSeed(env, onLog, "company-1", { enableRtk: true });
+    const remoteSettings = JSON.parse(await fs.readFile(path.join(seedDir, "settings.json"), "utf8"));
+
+    expect(remoteSettings.permissions).toEqual({ defaultMode: "default" });
+    expect(remoteSettings.hooks.PreToolUse).toBeDefined();
+    expect(remoteSettings.hooks.PreToolUse[0].matcher).toBe("Bash");
+  });
+});
+
+describe("ensureWorkspaceClaudeRtkSettings", () => {
+  const cleanupDirs: string[] = [];
+
+  afterEach(async () => {
+    while (cleanupDirs.length > 0) {
+      const dir = cleanupDirs.pop();
+      if (!dir) continue;
+      await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
+    }
+  });
+
+  it("creates .claude/settings.local.json with RTK hook in an empty workspace", async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-workspace-rtk-"));
+    cleanupDirs.push(workspace);
+
+    const onLog = vi.fn(async () => {});
+    await ensureWorkspaceClaudeRtkSettings(workspace, onLog);
+
+    const localSettingsPath = path.join(workspace, ".claude", "settings.local.json");
+    const content = JSON.parse(await fs.readFile(localSettingsPath, "utf8"));
+
+    expect(content.hooks.PreToolUse).toEqual([buildRtkBashHook()]);
+    expect(onLog).toHaveBeenCalledWith("stdout", expect.stringContaining("Configured RTK PreToolUse hook"));
+  });
+
+  it("preserves existing settings.local.json keys and avoids duplicate hooks", async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-workspace-rtk-existing-"));
+    cleanupDirs.push(workspace);
+    const claudeDir = path.join(workspace, ".claude");
+    await fs.mkdir(claudeDir, { recursive: true });
+    await fs.writeFile(path.join(claudeDir, "settings.local.json"), JSON.stringify({
+      customKey: "customValue",
+      hooks: {
+        PreToolUse: [{ matcher: "Edit", command: "linter.sh" }],
+      },
+    }), "utf8");
+
+    const onLog = vi.fn(async () => {});
+    await ensureWorkspaceClaudeRtkSettings(workspace, onLog);
+
+    const content = JSON.parse(await fs.readFile(path.join(claudeDir, "settings.local.json"), "utf8"));
+    expect(content.customKey).toBe("customValue");
+    expect(content.hooks.PreToolUse).toHaveLength(2);
+    expect(content.hooks.PreToolUse[0].matcher).toBe("Edit");
+    expect(content.hooks.PreToolUse[1].matcher).toBe("Bash");
+
+    // Running again does not duplicate the hook
+    await ensureWorkspaceClaudeRtkSettings(workspace, onLog);
+    const content2 = JSON.parse(await fs.readFile(path.join(claudeDir, "settings.local.json"), "utf8"));
+    expect(content2.hooks.PreToolUse).toHaveLength(2);
   });
 });
 
