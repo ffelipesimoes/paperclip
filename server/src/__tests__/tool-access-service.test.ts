@@ -2125,6 +2125,7 @@ describeEmbeddedPostgres("tool access service", () => {
     expect(listed.body.templates).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ templateId: "paperclip.echo-calculator-time", source: "built_in" }),
+        expect.objectContaining({ templateId: "paperclip.codegraph", source: "built_in", name: "CodeGraph AST Navigation" }),
         expect.objectContaining({ templateId: "local.echo-admin", source: "admin", status: "active" }),
       ]),
     );

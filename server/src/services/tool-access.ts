@@ -745,6 +745,51 @@ const APPROVED_STDIO_TEMPLATES: Record<string, {
       },
     ],
   },
+  "paperclip.codegraph": {
+    name: "CodeGraph AST Navigation",
+    command: "npx",
+    args: ["-y", "codegraph-mcp"],
+    envKeys: ["CODEGRAPH_INDEX_PATH"],
+    tools: [
+      {
+        name: "codegraph_search_symbols",
+        description: "Search indexed codebase symbols, types, functions, and interfaces via AST index.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "Symbol name or regex pattern to search" },
+          },
+          required: ["query"],
+        },
+        annotations: { readOnlyHint: true },
+      },
+      {
+        name: "codegraph_get_definition",
+        description: "Retrieve definition and AST signatures for a symbol without loading full source files.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            symbol: { type: "string", description: "Fully qualified symbol name" },
+            filePath: { type: "string", description: "Relative file path containing the symbol" },
+          },
+          required: ["symbol"],
+        },
+        annotations: { readOnlyHint: true },
+      },
+      {
+        name: "codegraph_find_references",
+        description: "Locate references and call sites of a symbol across the project.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            symbol: { type: "string", description: "Symbol name to find call sites for" },
+          },
+          required: ["symbol"],
+        },
+        annotations: { readOnlyHint: true },
+      },
+    ],
+  },
 };
 
 const GOOGLE_SHEETS_GALLERY_KEY = "google-sheets";

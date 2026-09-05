@@ -370,6 +370,11 @@ const BUILTIN_LOCAL_STDIO_RUNTIME_TEMPLATES: Record<string, Omit<LocalStdioRunti
     args: [],
     envKeys: [],
   },
+  "paperclip.codegraph": {
+    command: "npx",
+    args: ["-y", "codegraph-mcp"],
+    envKeys: ["CODEGRAPH_INDEX_PATH"],
+  },
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
