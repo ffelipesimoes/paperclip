@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { warnIfUnsupportedNodeVersion } from "@paperclipai/shared/node-version";
 import { onboard } from "./commands/onboard.js";
 import { doctor } from "./commands/doctor.js";
 import { envCommand } from "./commands/env.js";
@@ -40,6 +41,7 @@ import { registerWorkspaceCommands } from "./commands/client/workspace.js";
 import { registerAccessCommands } from "./commands/client/access.js";
 import { registerRoutineApiCommands } from "./commands/client/routine-api.js";
 import { registerAdapterCommands } from "./commands/client/adapter.js";
+import { registerManagedAgentCommands } from "./commands/managed-agent.js";
 import { registerAssetCommands } from "./commands/client/asset.js";
 import { registerSkillCommands } from "./commands/client/skill.js";
 import { cliVersion } from "./version.js";
@@ -47,6 +49,7 @@ import { installCommand } from "./commands/install.js";
 import { uninstallCommand } from "./commands/uninstall.js";
 import { updateCommand } from "./commands/update.js";
 import { registerServiceCommands } from "./commands/service.js";
+import { registerConnectionIntentCommands } from "./commands/client/connections.js";
 
 const program = new Command();
 const DATA_DIR_OPTION_HELP =
@@ -208,6 +211,7 @@ heartbeat
 
 registerContextCommands(program);
 registerConnectCommand(program);
+registerConnectionIntentCommands(program);
 registerCompanyCommands(program);
 registerIssueCommands(program);
 registerAgentCommands(program);
@@ -223,6 +227,7 @@ registerWorkspaceCommands(program);
 registerAccessCommands(program);
 registerRoutineApiCommands(program);
 registerAdapterCommands(program);
+registerManagedAgentCommands(program);
 registerAssetCommands(program);
 registerSkillCommands(program);
 registerRoutineCommands(program);
@@ -250,6 +255,8 @@ auth
 registerClientAuthCommands(auth);
 
 async function main(): Promise<void> {
+  warnIfUnsupportedNodeVersion(process.versions.node, (message) => console.warn(message));
+
   let failed = false;
   try {
     await program.parseAsync();
