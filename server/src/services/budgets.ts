@@ -79,6 +79,118 @@ function normalizeScopeName(scopeType: BudgetScopeType, name: string) {
   return name.trim().length > 0 ? name : scopeType;
 }
 
+async function resolveScopeRecords(
+  db: Db,
+  scopes: { scopeType: BudgetScopeType; scopeId: string }[],
+): Promise<Map<string, ScopeRecord>> {
+  const map = new Map<string, ScopeRecord>();
+  if (scopes.length === 0) return map;
+
+  const companyIds = new Set<string>();
+  const agentIds = new Set<string>();
+  const projectIds = new Set<string>();
+
+  for (const s of scopes) {
+    if (s.scopeType === "company") companyIds.add(s.scopeId);
+    else if (s.scopeType === "agent") agentIds.add(s.scopeId);
+    else if (s.scopeType === "project") projectIds.add(s.scopeId);
+  }
+
+  const promises: Promise<void>[] = [];
+
+  if (companyIds.size > 0) {
+    promises.push(
+      db
+        .select({
+          id: companies.id,
+          name: companies.name,
+          status: companies.status,
+          pauseReason: companies.pauseReason,
+          pausedAt: companies.pausedAt,
+        })
+        .from(companies)
+        .where(inArray(companies.id, [...companyIds]))
+        .then((rows) => {
+          for (const row of rows) {
+            map.set(`company:${row.id}`, {
+              companyId: row.id,
+              name: row.name,
+              paused: row.status === "paused" || Boolean(row.pausedAt),
+              pauseReason: (row.pauseReason as ScopeRecord["pauseReason"]) ?? null,
+            });
+          }
+        }),
+    );
+  }
+
+  if (agentIds.size > 0) {
+    promises.push(
+      db
+        .select({
+          id: agents.id,
+          companyId: agents.companyId,
+          name: agents.name,
+          status: agents.status,
+          pauseReason: agents.pauseReason,
+        })
+        .from(agents)
+        .where(inArray(agents.id, [...agentIds]))
+        .then((rows) => {
+          for (const row of rows) {
+            map.set(`agent:${row.id}`, {
+              companyId: row.companyId,
+              name: row.name,
+              paused: row.status === "paused",
+              pauseReason: (row.pauseReason as ScopeRecord["pauseReason"]) ?? null,
+            });
+          }
+        }),
+    );
+  }
+
+  if (projectIds.size > 0) {
+    promises.push(
+      db
+        .select({
+          id: projects.id,
+          companyId: projects.companyId,
+          name: projects.name,
+          pauseReason: projects.pauseReason,
+          pausedAt: projects.pausedAt,
+        })
+        .from(projects)
+        .where(inArray(projects.id, [...projectIds]))
+        .then((rows) => {
+          for (const row of rows) {
+            map.set(`project:${row.id}`, {
+              companyId: row.companyId,
+              name: row.name,
+              paused: Boolean(row.pausedAt),
+              pauseReason: (row.pauseReason as ScopeRecord["pauseReason"]) ?? null,
+            });
+          }
+        }),
+    );
+  }
+
+  await Promise.all(promises);
+  return map;
+}
+
+function getScopeRecordFromMap(
+  map: Map<string, ScopeRecord>,
+  scopeType: BudgetScopeType,
+  scopeId: string,
+): ScopeRecord {
+  const rec = map.get(`${scopeType}:${scopeId}`);
+  if (!rec) {
+    if (scopeType === "company") throw notFound("Company not found");
+    if (scopeType === "agent") throw notFound("Agent not found");
+    throw notFound("Project not found");
+  }
+  return rec;
+}
+
 async function resolveScopeRecord(db: Db, scopeType: BudgetScopeType, scopeId: string): Promise<ScopeRecord> {
   if (scopeType === "company") {
     const row = await db
@@ -94,7 +206,7 @@ async function resolveScopeRecord(db: Db, scopeType: BudgetScopeType, scopeId: s
       .then((rows) => rows[0] ?? null);
     if (!row) throw notFound("Company not found");
     return {
-      companyId: row.companyId,
+      companyId: (row as any).companyId ?? (row as any).id ?? scopeId,
       name: row.name,
       paused: row.status === "paused" || Boolean(row.pausedAt),
       pauseReason: (row.pauseReason as ScopeRecord["pauseReason"]) ?? null,
@@ -163,6 +275,108 @@ async function computeObservedAmount(
     .where(and(...conditions));
 
   return Number(row?.total ?? 0);
+}
+
+async function computeObservedAmountsBatch(
+  db: Db,
+  policies: Pick<PolicyRow, "id" | "companyId" | "scopeType" | "scopeId" | "windowKind" | "metric">[],
+): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  if (policies.length === 0) return result;
+
+  for (const p of policies) {
+    if (p.metric !== "billed_cents") {
+      result.set(p.id, 0);
+    }
+  }
+
+  const relevantPolicies = policies.filter((p) => p.metric === "billed_cents");
+  if (relevantPolicies.length === 0) return result;
+
+  const byWindow = new Map<BudgetWindowKind, typeof relevantPolicies>();
+  for (const p of relevantPolicies) {
+    const windowKind = p.windowKind as BudgetWindowKind;
+    const list = byWindow.get(windowKind) ?? [];
+    list.push(p);
+    byWindow.set(windowKind, list);
+  }
+
+  const queries: Promise<void>[] = [];
+
+  for (const [windowKind, windowPolicies] of byWindow.entries()) {
+    const { start, end } = resolveWindow(windowKind);
+    const timeConditions =
+      windowKind === "calendar_month_utc"
+        ? [gte(costEvents.occurredAt, start), lt(costEvents.occurredAt, end)]
+        : [];
+
+    const companyPolicies = windowPolicies.filter((p) => p.scopeType === "company");
+    const agentPolicies = windowPolicies.filter((p) => p.scopeType === "agent");
+    const projectPolicies = windowPolicies.filter((p) => p.scopeType === "project");
+
+    if (companyPolicies.length > 0) {
+      const companyId = companyPolicies[0].companyId;
+      queries.push(
+        db
+          .select({
+            total: sql<number>`coalesce(sum(${costEvents.costCents}), 0)::double precision`,
+          })
+          .from(costEvents)
+          .where(and(eq(costEvents.companyId, companyId), ...timeConditions))
+          .then(([row]) => {
+            const total = Number(row?.total ?? 0);
+            for (const p of companyPolicies) {
+              result.set(p.id, total);
+            }
+          }),
+      );
+    }
+
+    if (agentPolicies.length > 0) {
+      const companyId = agentPolicies[0].companyId;
+      const agentIds = [...new Set(agentPolicies.map((p) => p.scopeId))];
+      queries.push(
+        db
+          .select({
+            agentId: costEvents.agentId,
+            total: sql<number>`coalesce(sum(${costEvents.costCents}), 0)::double precision`,
+          })
+          .from(costEvents)
+          .where(and(eq(costEvents.companyId, companyId), inArray(costEvents.agentId, agentIds), ...timeConditions))
+          .groupBy(costEvents.agentId)
+          .then((rows) => {
+            const totalsByAgentId = new Map(rows.map((r) => [r.agentId, Number(r.total)]));
+            for (const p of agentPolicies) {
+              result.set(p.id, totalsByAgentId.get(p.scopeId) ?? 0);
+            }
+          }),
+      );
+    }
+
+    if (projectPolicies.length > 0) {
+      const companyId = projectPolicies[0].companyId;
+      const projectIds = [...new Set(projectPolicies.map((p) => p.scopeId))];
+      queries.push(
+        db
+          .select({
+            projectId: costEvents.projectId,
+            total: sql<number>`coalesce(sum(${costEvents.costCents}), 0)::double precision`,
+          })
+          .from(costEvents)
+          .where(and(eq(costEvents.companyId, companyId), inArray(costEvents.projectId, projectIds), ...timeConditions))
+          .groupBy(costEvents.projectId)
+          .then((rows) => {
+            const totalsByProjectId = new Map(rows.map((r) => [r.projectId, Number(r.total)]));
+            for (const p of projectPolicies) {
+              result.set(p.id, totalsByProjectId.get(p.scopeId) ?? 0);
+            }
+          }),
+      );
+    }
+  }
+
+  await Promise.all(queries);
+  return result;
 }
 
 function buildApprovalPayload(input: {
@@ -314,9 +528,11 @@ export function budgetService(db: Db, hooks: BudgetServiceHooks = {}) {
       .orderBy(desc(budgetPolicies.updatedAt));
   }
 
-  async function buildPolicySummary(policy: PolicyRow): Promise<BudgetPolicySummary> {
-    const scope = await resolveScopeRecord(db, policy.scopeType as BudgetScopeType, policy.scopeId);
-    const observedAmount = await computeObservedAmount(db, policy);
+  function buildPolicySummarySync(
+    policy: PolicyRow,
+    scope: ScopeRecord,
+    observedAmount: number,
+  ): BudgetPolicySummary {
     const { start, end } = resolveWindow(policy.windowKind as BudgetWindowKind);
     const amount = policy.isActive ? policy.amount : 0;
     const utilizationPercent =
@@ -345,6 +561,18 @@ export function budgetService(db: Db, hooks: BudgetServiceHooks = {}) {
       windowStart: start,
       windowEnd: end,
     };
+  }
+
+  async function buildPolicySummary(
+    policy: PolicyRow,
+    options?: {
+      scope?: ScopeRecord;
+      observedAmount?: number;
+    },
+  ): Promise<BudgetPolicySummary> {
+    const scope = options?.scope ?? await resolveScopeRecord(db, policy.scopeType as BudgetScopeType, policy.scopeId);
+    const observedAmount = options?.observedAmount ?? await computeObservedAmount(db, policy);
+    return buildPolicySummarySync(policy, scope, observedAmount);
   }
 
   async function createIncidentIfNeeded(
@@ -456,7 +684,11 @@ export function budgetService(db: Db, hooks: BudgetServiceHooks = {}) {
     }
   }
 
-  async function hydrateIncidentRows(rows: IncidentRow[]): Promise<BudgetIncident[]> {
+  async function hydrateIncidentRows(
+    rows: IncidentRow[],
+    preloadedScopes?: Map<string, ScopeRecord>,
+  ): Promise<BudgetIncident[]> {
+    if (rows.length === 0) return [];
     const approvalIds = rows.map((row) => row.approvalId).filter((value): value is string => Boolean(value));
     const approvalRows = approvalIds.length > 0
       ? await db
@@ -465,6 +697,33 @@ export function budgetService(db: Db, hooks: BudgetServiceHooks = {}) {
         .where(inArray(approvals.id, approvalIds))
       : [];
     const approvalStatusById = new Map(approvalRows.map((row) => [row.id, row.status]));
+
+    if (preloadedScopes) {
+      return rows.map((row) => {
+        const scope = getScopeRecordFromMap(preloadedScopes, row.scopeType as BudgetScopeType, row.scopeId);
+        return {
+          id: row.id,
+          companyId: row.companyId,
+          policyId: row.policyId,
+          scopeType: row.scopeType as BudgetScopeType,
+          scopeId: row.scopeId,
+          scopeName: normalizeScopeName(row.scopeType as BudgetScopeType, scope.name),
+          metric: row.metric as BudgetMetric,
+          windowKind: row.windowKind as BudgetWindowKind,
+          windowStart: row.windowStart,
+          windowEnd: row.windowEnd,
+          thresholdType: row.thresholdType as BudgetThresholdType,
+          amountLimit: row.amountLimit,
+          amountObserved: row.amountObserved,
+          status: row.status as BudgetIncident["status"],
+          approvalId: row.approvalId ?? null,
+          approvalStatus: row.approvalId ? approvalStatusById.get(row.approvalId) ?? null : null,
+          resolvedAt: row.resolvedAt ?? null,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+        };
+      });
+    }
 
     return Promise.all(
       rows.map(async (row) => {
@@ -628,14 +887,35 @@ export function budgetService(db: Db, hooks: BudgetServiceHooks = {}) {
     },
 
     overview: async (companyId: string): Promise<BudgetOverview> => {
-      const rows = await listPolicyRows(companyId);
-      const policies = await Promise.all(rows.map((row) => buildPolicySummary(row)));
-      const activeIncidentRows = await db
-        .select()
-        .from(budgetIncidents)
-        .where(and(eq(budgetIncidents.companyId, companyId), eq(budgetIncidents.status, "open")))
-        .orderBy(desc(budgetIncidents.createdAt));
-      const activeIncidents = await hydrateIncidentRows(activeIncidentRows);
+      const [rows, activeIncidentRows] = await Promise.all([
+        listPolicyRows(companyId),
+        db
+          .select()
+          .from(budgetIncidents)
+          .where(and(eq(budgetIncidents.companyId, companyId), eq(budgetIncidents.status, "open")))
+          .orderBy(desc(budgetIncidents.createdAt)),
+      ]);
+
+      const allScopes = [
+        ...rows.map((r) => ({ scopeType: r.scopeType as BudgetScopeType, scopeId: r.scopeId })),
+        ...activeIncidentRows.map((r) => ({ scopeType: r.scopeType as BudgetScopeType, scopeId: r.scopeId })),
+      ];
+
+      const [scopeMap, observedAmounts] = await Promise.all([
+        resolveScopeRecords(db, allScopes),
+        computeObservedAmountsBatch(db, rows),
+      ]);
+
+      const policies = rows.map((row) =>
+        buildPolicySummarySync(
+          row,
+          getScopeRecordFromMap(scopeMap, row.scopeType as BudgetScopeType, row.scopeId),
+          observedAmounts.get(row.id) ?? 0,
+        ),
+      );
+
+      const activeIncidents = await hydrateIncidentRows(activeIncidentRows, scopeMap);
+
       return {
         companyId,
         policies,

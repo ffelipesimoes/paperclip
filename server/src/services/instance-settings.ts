@@ -327,6 +327,19 @@ export function applyManagedExperimentalOverlay(
   return { experimental: next, managedKeys };
 }
 
+const SETTINGS_CACHE_TTL_MS = 60_000;
+type CachedSettingsRow = {
+  row: typeof instanceSettings.$inferSelect;
+  cachedAt: number;
+};
+const settingsCacheByDb = new WeakMap<object, CachedSettingsRow>();
+
+export function invalidateInstanceSettingsCache(dbObj?: object): void {
+  if (dbObj) {
+    settingsCacheByDb.delete(dbObj);
+  }
+}
+
 export function instanceSettingsService(db: Db, options: InstanceSettingsServiceOptions = {}) {
   // Fail closed: a malformed PAPERCLIP_MANAGED_CONFIG throws here (and at
   // boot in index.ts) rather than silently running without the overlay.
@@ -361,12 +374,25 @@ export function instanceSettingsService(db: Db, options: InstanceSettingsService
     } as InstanceSettings;
   }
   async function getOrCreateRow(runner: InstanceSettingsWriteDb = db) {
+    const nowMs = Date.now();
+    if (runner === db) {
+      const cached = settingsCacheByDb.get(db as object);
+      if (cached && nowMs - cached.cachedAt < SETTINGS_CACHE_TTL_MS) {
+        return cached.row;
+      }
+    }
+
     const existing = await runner
       .select()
       .from(instanceSettings)
       .where(eq(instanceSettings.singletonKey, DEFAULT_SINGLETON_KEY))
       .then((rows) => rows[0] ?? null);
-    if (existing) return existing;
+    if (existing) {
+      if (runner === db) {
+        settingsCacheByDb.set(db as object, { row: existing, cachedAt: nowMs });
+      }
+      return existing;
+    }
 
     const now = new Date();
     const [created] = await runner
@@ -386,14 +412,24 @@ export function instanceSettingsService(db: Db, options: InstanceSettingsService
       })
       .returning();
 
-    if (created) return created;
+    if (created) {
+      if (runner === db) {
+        settingsCacheByDb.set(db as object, { row: created, cachedAt: nowMs });
+      }
+      return created;
+    }
 
     const raced = await runner
       .select()
       .from(instanceSettings)
       .where(eq(instanceSettings.singletonKey, DEFAULT_SINGLETON_KEY))
       .then((rows) => rows[0] ?? null);
-    if (raced) return raced;
+    if (raced) {
+      if (runner === db) {
+        settingsCacheByDb.set(db as object, { row: raced, cachedAt: nowMs });
+      }
+      return raced;
+    }
 
     throw new Error("Failed to initialize instance settings row");
   }
@@ -422,6 +458,7 @@ export function instanceSettingsService(db: Db, options: InstanceSettingsService
         })
         .where(eq(instanceSettings.id, current.id))
         .returning();
+      settingsCacheByDb.delete(db as object);
       return toInstanceSettings(updated ?? current);
     },
 
@@ -455,6 +492,7 @@ export function instanceSettingsService(db: Db, options: InstanceSettingsService
         })
         .where(eq(instanceSettings.id, current.id))
         .returning();
+      settingsCacheByDb.delete(db as object);
       return toInstanceSettings(updated ?? current);
     },
 
@@ -470,6 +508,7 @@ export function instanceSettingsService(db: Db, options: InstanceSettingsService
         })
         .where(eq(instanceSettings.id, current.id))
         .returning();
+      settingsCacheByDb.delete(db as object);
       return toInstanceSettings(updated ?? current);
     },
 

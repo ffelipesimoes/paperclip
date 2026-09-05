@@ -790,13 +790,23 @@ function budgetObservedPercent(amountObserved: number, amountLimit: number) {
   return amountLimit > 0 ? Math.round((amountObserved / amountLimit) * 10_000) / 100 : 0;
 }
 
+const COMPANY_PREFIX_CACHE_TTL_MS = 60_000;
+const companyPrefixCache = new Map<string, { prefix: string; cachedAt: number }>();
+
 async function companyPrefix(db: Db, companyId: string) {
+  const now = Date.now();
+  const cached = companyPrefixCache.get(companyId);
+  if (cached && now - cached.cachedAt < COMPANY_PREFIX_CACHE_TTL_MS) {
+    return cached.prefix;
+  }
   const row = await db
     .select({ issuePrefix: companies.issuePrefix })
     .from(companies)
     .where(eq(companies.id, companyId))
     .then((rows) => rows[0] ?? null);
-  return row?.issuePrefix ?? "PAP";
+  const prefix = row?.issuePrefix ?? "PAP";
+  companyPrefixCache.set(companyId, { prefix, cachedAt: now });
+  return prefix;
 }
 
 async function dismissalByKey(db: Db, companyId: string, userId: string | null | undefined) {

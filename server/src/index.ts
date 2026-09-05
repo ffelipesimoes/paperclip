@@ -1544,10 +1544,14 @@ export async function startServer(): Promise<StartedServer> {
     // restart, so a leaked sandbox does not stay allocated across the restart.
     await runEnvironmentLeaseCleanupSweep(0);
 
-    const runRetentionSweep = async () => {
+    const runRetentionSweep = async (forceFullScan = false) => {
       const activeCompanies = await db.select({ id: companies.id }).from(companies).where(eq(companies.status, "active"));
       let archived = 0;
       for (const company of activeCompanies) {
+        if (!forceFullScan) {
+          const hasCandidates = await retentionExecutor.hasArchiveCandidates(company.id);
+          if (!hasCandidates) continue;
+        }
         // Cursor pagination rebuilds the whole feed for every page; one
         // unscoped all-items build keeps this sweep at a single feed build
         // per company per tick.
@@ -1561,7 +1565,7 @@ export async function startServer(): Promise<StartedServer> {
       const notifications = await retentionExecutor.deliverNotifications();
       return { archived, ...notifications };
     };
-    await runRetentionSweep();
+    await runRetentionSweep(true);
 
     startHeartbeatSchedulerInterval(() => {
       // Track the outer async callback as well as the work it starts. Shutdown

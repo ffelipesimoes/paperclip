@@ -394,6 +394,21 @@ export function decisionRetentionService(
     return archived;
   }
 
+  async function hasArchiveCandidates(companyId: string, now = new Date()): Promise<boolean> {
+    const cutoff = new Date(now.getTime() - DEFAULT_DECISION_ARCHIVE_DAYS * DAY_MS);
+    const [row] = await db
+      .select({ id: decisionRetention.id })
+      .from(decisionRetention)
+      .where(and(
+        eq(decisionRetention.companyId, companyId),
+        eq(decisionRetention.keep, false),
+        isNull(decisionRetention.archivedAt),
+        lte(decisionRetention.sourceActivityAt, cutoff),
+      ))
+      .limit(1);
+    return Boolean(row);
+  }
+
   async function deliverNotifications(limit = 500) {
     if (!options.notifyOriginAgent) return { notifiedAgents: 0, delivered: 0 };
     const claimAt = new Date();
@@ -477,6 +492,7 @@ export function decisionRetentionService(
     revive: (input: Omit<Parameters<typeof changeArchived>[0], "archived">) => changeArchived({ ...input, archived: false }),
     archiveReviewedManifest,
     autoArchive,
+    hasArchiveCandidates,
     deliverNotifications,
   };
 }

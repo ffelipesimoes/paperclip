@@ -169,4 +169,23 @@ describePg("decision retention", () => {
     })).rejects.toThrow("archive_proposal_stale");
     expect((await db.select().from(decisionRetention)).every((row) => row.archivedAt === null)).toBe(true);
   });
+
+  it("accurately detects when archive candidates exist vs none", async () => {
+    const { companyId } = await seedReviewItems(1);
+    const svc = decisionRetentionService(db);
+    const old = new Date("2026-04-01T00:00:00.000Z");
+    const future = new Date("2026-08-02T00:00:00.000Z");
+
+    // Before syncing items to decisionRetention, hasArchiveCandidates is false
+    expect(await svc.hasArchiveCandidates(companyId, old)).toBe(false);
+
+    // Sync item
+    await attentionService(db, { now: () => old.getTime() }).list(companyId, { limit: 10 });
+
+    // With now = old, the item is not older than 7 days, so hasArchiveCandidates is false
+    expect(await svc.hasArchiveCandidates(companyId, old)).toBe(false);
+
+    // With now = future (> 7 days later), candidate is detected
+    expect(await svc.hasArchiveCandidates(companyId, future)).toBe(true);
+  });
 });

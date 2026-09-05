@@ -13,7 +13,7 @@ import { conflict, forbidden, notFound } from "../errors.js";
 
 export const BOARD_API_KEY_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const CLI_AUTH_CHALLENGE_TTL_MS = 10 * 60 * 1000;
-const BOARD_API_KEY_TOUCH_DEBOUNCE_MS = 60_000;
+const BOARD_API_KEY_TOUCH_DEBOUNCE_MS = 5 * 60_000;
 const BOARD_API_KEY_TOUCH_CACHE_MAX = 1_000;
 
 export type CliAuthChallengeStatus = "pending" | "approved" | "cancelled" | "expired";

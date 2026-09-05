@@ -74,5 +74,10 @@ export const issueThreadInteractions = pgTable(
     sourceCommentIdx: index("issue_thread_interactions_source_comment_idx").on(table.sourceCommentId),
     addresseeAgentIdx: index("issue_thread_interactions_addressee_agent_idx").on(table.addresseeAgentId),
     addresseeUserIdx: index("issue_thread_interactions_addressee_user_idx").on(table.addresseeUserId),
+    companyStatusUpdatedIdx: index("issue_thread_interactions_company_status_updated_idx").on(
+      table.companyId,
+      table.status,
+      table.updatedAt.desc(),
+    ),
   }),
 );

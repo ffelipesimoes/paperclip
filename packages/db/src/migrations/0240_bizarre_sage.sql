@@ -1,0 +1,5 @@
+-- paperclip:migration-safety-ignore large-create-index-not-concurrently: Drizzle migrations run transactionally, so CONCURRENTLY is unavailable. This composite index optimizes entity activity history queries (entity_type, entity_id, created_at desc) preventing frequent table scans on activity_log.
+CREATE INDEX "activity_log_company_entity_created_idx" ON "activity_log" USING btree ("company_id","entity_type","entity_id","created_at" DESC NULLS LAST);--> statement-breakpoint
+CREATE INDEX "cost_events_company_project_occurred_idx" ON "cost_events" USING btree ("company_id","project_id","occurred_at");--> statement-breakpoint
+CREATE INDEX "decisions_company_status_updated_idx" ON "decisions" USING btree ("company_id","status","updated_at" DESC NULLS LAST);--> statement-breakpoint
+CREATE INDEX "issue_thread_interactions_company_status_updated_idx" ON "issue_thread_interactions" USING btree ("company_id","status","updated_at" DESC NULLS LAST);
