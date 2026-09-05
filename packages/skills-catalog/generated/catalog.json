@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "packageName": "@paperclipai/skills-catalog",
   "packageVersion": "0.3.1",
-  "generatedAt": "2026-08-11T15:05:34.526Z",
+  "generatedAt": "2026-09-05T21:03:57.592Z",
   "skills": [
     {
       "id": "paperclipai:bundled:docs:doc-maintenance",
@@ -1113,6 +1113,86 @@
         "path": "skills/last30days",
         "url": "https://github.com/mvanhorn/last30days-skill/tree/v3.3.0/skills/last30days"
       }
+    },
+    {
+      "id": "paperclipai:optional:software-development:concise-mode",
+      "key": "paperclipai/optional/software-development/concise-mode",
+      "kind": "optional",
+      "category": "software-development",
+      "slug": "concise-mode",
+      "name": "concise-mode",
+      "description": "Instruct agents to communicate with extreme brevity and factual density, omitting conversational filler, pleasantries, and tutorial preambles to reduce output token consumption.",
+      "path": "catalog/optional/software-development/concise-mode",
+      "entrypoint": "SKILL.md",
+      "trustLevel": "markdown_only",
+      "compatibility": "compatible",
+      "defaultInstall": false,
+      "recommendedForRoles": [
+        "engineer",
+        "qa"
+      ],
+      "requires": [],
+      "tags": [
+        "efficiency",
+        "token-optimization",
+        "concise",
+        "caveman-mode"
+      ],
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "skill",
+          "sizeBytes": 2145,
+          "sha256": "6b0b4569eb4230e8f8e8950c5360b22ffa49cd3ad7a4b2a9f22746e8c66ba2a4"
+        },
+        {
+          "path": "examples/concise-task-execution.md",
+          "kind": "markdown",
+          "sizeBytes": 1487,
+          "sha256": "861de41724dd115f92b7cd717c2b1e3ae4b70149bb8f1b38cbcb268e7b0a3f55"
+        }
+      ],
+      "contentHash": "sha256:95fb6086f23052e9b2c799b86f3dd4a2089545457765c3b0b3b9e3b087cef966"
+    },
+    {
+      "id": "paperclipai:optional:software-development:cost-guard",
+      "key": "paperclipai/optional/software-development/cost-guard",
+      "kind": "optional",
+      "category": "software-development",
+      "slug": "cost-guard",
+      "name": "cost-guard",
+      "description": "Enforce token-efficient codebase investigation rules: avoid repetitive file reads, slice large files by line range, omit noisy diffs, and check budget limits before broad exploratory loops.",
+      "path": "catalog/optional/software-development/cost-guard",
+      "entrypoint": "SKILL.md",
+      "trustLevel": "markdown_only",
+      "compatibility": "compatible",
+      "defaultInstall": false,
+      "recommendedForRoles": [
+        "engineer",
+        "researcher"
+      ],
+      "requires": [],
+      "tags": [
+        "token-efficiency",
+        "cost-control",
+        "budget",
+        "codebase-navigation"
+      ],
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "skill",
+          "sizeBytes": 1933,
+          "sha256": "e8fdbf4d2f6bf365ef6d9d8db9fff8e97e19e5f2931f40858f9f744ed5324f31"
+        },
+        {
+          "path": "examples/efficient-file-inspection.md",
+          "kind": "markdown",
+          "sizeBytes": 1168,
+          "sha256": "97d7087084c22b15b2e1ac02b2755daba331f44ad9f9ab727015ddc853a716d7"
+        }
+      ],
+      "contentHash": "sha256:9ef46624ba8df65241eeedb03b633cad7f6b469b73402e3f0ad143bd056d23a4"
     },
     {
       "id": "paperclipai:optional:software-development:prepare-mcp-integration",
