@@ -117,14 +117,25 @@ If your hosted database requires transaction-pooling-only connections (pgbouncer
 
 ### Client tuning (optional)
 
-All of these are optional; when unset, the driver defaults apply and behavior is unchanged — typical self-hosted setups need none of them:
+All of these are optional; when unset, the driver defaults apply and behavior is unchanged — typical single-agent self-hosted setups need none of them:
 
 ```sh
 DATABASE_PREPARED_STATEMENTS=false   # required for transaction-mode poolers; default: enabled
 DATABASE_POOL_MAX=25                 # connection pool size; default: 10
 DATABASE_IDLE_TIMEOUT_SECONDS=60     # close idle pooled connections; default: keep open
-DATABASE_CONNECT_TIMEOUT_SECONDS=10  # default: 30
+DATABASE_CONNECT_TIMEOUT_SECONDS=10  # timeout for acquiring connection; default: 30
 ```
+
+#### Pool sizing recommendations
+In multi-agent deployments, database connections are shared across three primary consumers:
+1. **Agent heartbeats and tool execution runs:** Active agents executing commands or checking in.
+2. **Background sweepers and maintenance services:** Recovery sweepers, watchdog timers, and routine runners.
+3. **Board UI sessions:** Operator REST queries and polling.
+
+If `DATABASE_POOL_MAX` is set too low (e.g. the default 10 connections under high concurrency), concurrent operations queue behind connection checkout, causing latency spikes and potential checkout timeouts.
+- **Single-instance production with 5-15 agents:** Set `DATABASE_POOL_MAX=25` to `35`.
+- **Large multi-agent clusters:** Use an external connection pooler (e.g., Supavisor, PgBouncer) with transaction mode, set `DATABASE_PREPARED_STATEMENTS=false`, and set `DATABASE_MIGRATION_URL` to a direct port 5432 endpoint.
+- **Connection hygiene:** `DATABASE_IDLE_TIMEOUT_SECONDS=60` releases idle connections back to the database, preventing connection accumulation during quiet hours.
 
 ### Push the schema
 

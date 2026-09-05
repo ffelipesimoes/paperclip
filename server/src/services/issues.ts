@@ -1597,16 +1597,8 @@ function issueLatestLogAtExpr(companyId: string) {
   `;
 }
 
-function issueCanonicalLastActivityAtExpr(companyId: string) {
-  const latestCommentAt = issueLatestCommentAtExpr(companyId);
-  const latestLogAt = issueLatestLogAtExpr(companyId);
-  return sql<Date>`
-    GREATEST(
-      ${issues.updatedAt},
-      COALESCE(${latestCommentAt}, to_timestamp(0)),
-      COALESCE(${latestLogAt}, to_timestamp(0))
-    )
-  `;
+function issueCanonicalLastActivityAtExpr(_companyId?: string) {
+  return issues.lastActivityAt;
 }
 
 function unreadForUserCondition(companyId: string, userId: string) {
@@ -2983,7 +2975,10 @@ async function listIssueReviewAttentionMap(
       .where(and(
         eq(heartbeatRuns.companyId, companyId),
         inArray(heartbeatRuns.status, ["queued", "running"]),
-        inArray(sql<string>`coalesce(${heartbeatRuns.contextSnapshot} ->> 'issueId', ${heartbeatRuns.contextSnapshot} ->> 'taskId')`, reviewIds),
+        or(
+          inArray(sql<string>`${heartbeatRuns.contextSnapshot} ->> 'issueId'`, reviewIds),
+          inArray(sql<string>`${heartbeatRuns.contextSnapshot} ->> 'taskId'`, reviewIds),
+        ),
       )),
     dbOrTx
       .select({
@@ -3004,12 +2999,12 @@ async function listIssueReviewAttentionMap(
       .where(and(
         eq(agentWakeupRequests.companyId, companyId),
         inArray(agentWakeupRequests.status, ["queued", "deferred_issue_execution", "claimed"]),
-        inArray(sql<string>`coalesce(
-          ${agentWakeupRequests.payload} ->> 'issueId',
-          ${agentWakeupRequests.payload} ->> 'taskId',
-          ${agentWakeupRequests.payload} -> '_paperclipWakeContext' ->> 'issueId',
-          ${agentWakeupRequests.payload} -> '_paperclipWakeContext' ->> 'taskId'
-        )`, reviewIds),
+        or(
+          inArray(sql<string>`${agentWakeupRequests.payload} ->> 'issueId'`, reviewIds),
+          inArray(sql<string>`${agentWakeupRequests.payload} ->> 'taskId'`, reviewIds),
+          inArray(sql<string>`${agentWakeupRequests.payload} -> '_paperclipWakeContext' ->> 'issueId'`, reviewIds),
+          inArray(sql<string>`${agentWakeupRequests.payload} -> '_paperclipWakeContext' ->> 'taskId'`, reviewIds),
+        ),
       )),
     dbOrTx
       .select({
@@ -3291,6 +3286,7 @@ const issueListSelect = {
   hiddenAt: issues.hiddenAt,
   createdAt: issues.createdAt,
   updatedAt: issues.updatedAt,
+  lastActivityAt: issues.lastActivityAt,
 };
 
 function withActiveRuns(
@@ -3863,10 +3859,10 @@ async function listIssueBlockedInboxAttentionMap(
           .where(and(
             eq(heartbeatRuns.companyId, companyId),
             inArray(heartbeatRuns.status, [...BLOCKED_INBOX_ACTIVE_RUN_STATUSES]),
-            inArray(sql<string>`coalesce(
-              ${heartbeatRuns.contextSnapshot} ->> 'issueId',
-              ${heartbeatRuns.contextSnapshot} ->> 'taskId'
-            )`, graphIssueIds),
+            or(
+              inArray(sql<string>`${heartbeatRuns.contextSnapshot} ->> 'issueId'`, graphIssueIds),
+              inArray(sql<string>`${heartbeatRuns.contextSnapshot} ->> 'taskId'`, graphIssueIds),
+            ),
           )),
     graphIssueIds.length === 0
       ? Promise.resolve([])
@@ -3886,12 +3882,12 @@ async function listIssueBlockedInboxAttentionMap(
           .where(and(
             eq(agentWakeupRequests.companyId, companyId),
             inArray(agentWakeupRequests.status, [...BLOCKED_INBOX_ACTIVE_WAKE_STATUSES]),
-            inArray(sql<string>`coalesce(
-              ${agentWakeupRequests.payload} ->> 'issueId',
-              ${agentWakeupRequests.payload} ->> 'taskId',
-              ${agentWakeupRequests.payload} -> '_paperclipWakeContext' ->> 'issueId',
-              ${agentWakeupRequests.payload} -> '_paperclipWakeContext' ->> 'taskId'
-            )`, graphIssueIds),
+            or(
+              inArray(sql<string>`${agentWakeupRequests.payload} ->> 'issueId'`, graphIssueIds),
+              inArray(sql<string>`${agentWakeupRequests.payload} ->> 'taskId'`, graphIssueIds),
+              inArray(sql<string>`${agentWakeupRequests.payload} -> '_paperclipWakeContext' ->> 'issueId'`, graphIssueIds),
+              inArray(sql<string>`${agentWakeupRequests.payload} -> '_paperclipWakeContext' ->> 'taskId'`, graphIssueIds),
+            ),
           )),
     graphIssueIds.length === 0
       ? Promise.resolve([])
@@ -3909,10 +3905,10 @@ async function listIssueBlockedInboxAttentionMap(
           .where(and(
             eq(heartbeatRuns.companyId, companyId),
             eq(heartbeatRuns.status, "scheduled_retry"),
-            inArray(sql<string>`coalesce(
-              ${heartbeatRuns.contextSnapshot} ->> 'issueId',
-              ${heartbeatRuns.contextSnapshot} ->> 'taskId'
-            )`, graphIssueIds),
+            or(
+              inArray(sql<string>`${heartbeatRuns.contextSnapshot} ->> 'issueId'`, graphIssueIds),
+              inArray(sql<string>`${heartbeatRuns.contextSnapshot} ->> 'taskId'`, graphIssueIds),
+            ),
           )),
     graphIssueIds.length === 0
       ? Promise.resolve([])
@@ -4361,7 +4357,6 @@ async function listBlockedInboxIssues(
   const [
     statsRows,
     readRows,
-    lastActivityRows,
     blockedByMap,
     blockerAttentionByIssueId,
     reviewAttentionByIssueId,
@@ -4371,7 +4366,6 @@ async function listBlockedInboxIssues(
   ] = await Promise.all([
     contextUserId ? userCommentStatsForIssues(dbOrTx, companyId, contextUserId, issueIds) : Promise.resolve([]),
     contextUserId ? userReadStatsForIssues(dbOrTx, companyId, contextUserId, issueIds) : Promise.resolve([]),
-    lastActivityStatsForIssues(dbOrTx, companyId, issueIds),
     blockedByMapForIssues(dbOrTx, companyId, issueIds),
     listIssueBlockerAttentionMap(dbOrTx, companyId, withRuns),
     listIssueReviewAttentionMap(dbOrTx, companyId, withRuns),
@@ -4402,7 +4396,6 @@ async function listBlockedInboxIssues(
   }
   const statsByIssueId = new Map(statsRows.map((row) => [row.issueId, row]));
   const readByIssueId = new Map(readRows.map((row) => [row.issueId, row.myLastReadAt]));
-  const lastActivityByIssueId = new Map(lastActivityRows.map((row) => [row.issueId, row]));
 
   const enriched = withRuns.flatMap((row) => {
     const blockedInboxAttention = blockedInboxAttentionByIssueId.get(row.id);
@@ -4413,12 +4406,7 @@ async function listBlockedInboxIssues(
       && !commentSearchMatchIssueIds.has(row.id)
     ) return [];
 
-    const activity = lastActivityByIssueId.get(row.id);
-    const lastActivityAt = latestIssueActivityAt(
-      row.updatedAt,
-      activity?.latestCommentAt ?? null,
-      activity?.latestLogAt ?? null,
-    ) ?? row.updatedAt;
+    const lastActivityAt = row.lastActivityAt ?? row.updatedAt;
     return [{
       ...row,
       description: blockedInboxResponseDescription(blockedInboxAttention, row),
@@ -5805,14 +5793,13 @@ export function issueService(db: Db) {
       }
 
       const issueIds = withRuns.map((row) => row.id);
-      const [statsRows, readRows, lastActivityRows, archiveRows, blockedByMap, liveDescendantCountByIssueId] = await Promise.all([
+      const [statsRows, readRows, archiveRows, blockedByMap, liveDescendantCountByIssueId] = await Promise.all([
         contextUserId
           ? userCommentStatsForIssues(db, companyId, contextUserId, issueIds)
           : Promise.resolve([]),
         contextUserId
           ? userReadStatsForIssues(db, companyId, contextUserId, issueIds)
           : Promise.resolve([]),
-        lastActivityStatsForIssues(db, companyId, issueIds),
         contextUserId
           ? inboxArchiveRowsForIssues(db, companyId, contextUserId, issueIds)
           : Promise.resolve([]),
@@ -5824,7 +5811,6 @@ export function issueService(db: Db) {
           : Promise.resolve(new Map<string, number>()),
       ]);
       const statsByIssueId = new Map(statsRows.map((row) => [row.issueId, row]));
-      const lastActivityByIssueId = new Map(lastActivityRows.map((row) => [row.issueId, row]));
       const archiveByIssueId = new Map(archiveRows.map((row) => [row.issueId, row]));
       const [
         blockerAttentionByIssueId,
@@ -5842,12 +5828,7 @@ export function issueService(db: Db) {
 
       if (!contextUserId) {
         return withRuns.map((row) => {
-          const activity = lastActivityByIssueId.get(row.id);
-          const lastActivityAt = latestIssueActivityAt(
-            row.updatedAt,
-            activity?.latestCommentAt ?? null,
-            activity?.latestLogAt ?? null,
-          ) ?? row.updatedAt;
+          const lastActivityAt = row.lastActivityAt ?? row.updatedAt;
           return {
             ...row,
             ...(includeBlockedBy ? { blockedBy: blockedByMap.get(row.id) ?? [] } : {}),
@@ -5866,12 +5847,7 @@ export function issueService(db: Db) {
       const readByIssueId = new Map(readRows.map((row) => [row.issueId, row.myLastReadAt]));
 
       return withRuns.map((row) => {
-        const activity = lastActivityByIssueId.get(row.id);
-        const lastActivityAt = latestIssueActivityAt(
-          row.updatedAt,
-          activity?.latestCommentAt ?? null,
-          activity?.latestLogAt ?? null,
-        ) ?? row.updatedAt;
+        const lastActivityAt = row.lastActivityAt ?? row.updatedAt;
         return {
           ...row,
           ...activeInboxArchiveFields(archiveByIssueId.get(row.id), lastActivityAt),
@@ -6044,18 +6020,25 @@ export function issueService(db: Db) {
     },
 
     getActiveInboxArchiveFields: async (
-      issue: Pick<IssueRow, "id" | "companyId" | "updatedAt">,
+      issue: Pick<IssueRow, "id" | "companyId" | "updatedAt"> & { lastActivityAt?: Date | null },
       userId: string,
     ) => {
-      const [[activity], [archive]] = await Promise.all([
-        lastActivityStatsForIssues(db, issue.companyId, [issue.id]),
+      const [archiveRows, activityRows] = await Promise.all([
         inboxArchiveRowsForIssues(db, issue.companyId, userId, [issue.id]),
+        issue.lastActivityAt != null
+          ? Promise.resolve([])
+          : lastActivityStatsForIssues(db, issue.companyId, [issue.id]),
       ]);
-      const lastActivityAt = latestIssueActivityAt(
-        issue.updatedAt,
-        activity?.latestCommentAt ?? null,
-        activity?.latestLogAt ?? null,
-      ) ?? issue.updatedAt;
+      const archive = archiveRows[0];
+      const lastActivityAt = (issue.lastActivityAt ?? (
+        activityRows.length > 0
+          ? latestIssueActivityAt(
+              issue.updatedAt,
+              activityRows[0]?.latestCommentAt ?? null,
+              activityRows[0]?.latestLogAt ?? null,
+            )
+          : null
+      )) ?? issue.updatedAt;
       return activeInboxArchiveFields(archive, lastActivityAt);
     },
 

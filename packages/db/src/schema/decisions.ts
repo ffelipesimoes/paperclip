@@ -74,6 +74,11 @@ export const decisions = pgTable(
     companyIdempotencyUq: uniqueIndex("decisions_company_idempotency_uq")
       .on(table.companyId, table.idempotencyKey)
       .where(sql`${table.idempotencyKey} IS NOT NULL`),
+    companyStatusUpdatedIdx: index("decisions_company_status_updated_idx").on(
+      table.companyId,
+      table.status,
+      table.updatedAt.desc(),
+    ),
   }),
 );
 
