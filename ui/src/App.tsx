@@ -237,6 +237,7 @@ function boardRoutes(streamlinedUiEnabled: boolean) {
         <Route path="company/settings/instance/observability" element={<InstanceObservability />} />
       </Route>
       <Route path="observability" element={<Navigate to="/company/settings/instance/observability" replace />} />
+      <Route path="admin/observability" element={<Navigate to="/company/settings/instance/observability" replace />} />
       <Route element={<HiddenSettingsPageGate pageKey="instance.experimental" />}>
         <Route path="company/settings/instance/experimental" element={<InstanceExperimentalSettings />} />
       </Route>
@@ -753,6 +754,7 @@ export function App() {
           <Route path="instance/settings/*" element={<LegacySettingsRedirect />} />
           <Route path="company/settings/instance/observability" element={<UnprefixedBoardRedirect />} />
           <Route path="observability" element={<UnprefixedBoardRedirect />} />
+          <Route path="admin/observability" element={<UnprefixedBoardRedirect />} />
           <Route path="companies" element={<UnprefixedBoardRedirect />} />
           <Route path="issues" element={<UnprefixedBoardRedirect />} />
           <Route path="tasks" element={<UnprefixedBoardRedirect />} />

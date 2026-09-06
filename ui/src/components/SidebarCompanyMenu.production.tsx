@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  Activity,
   Check,
   ChevronsUpDown,
   GripVertical,
@@ -23,6 +24,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { hidesCompanyPage, type Company } from "@paperclipai/shared";
 import { Link, useLocation, useNavigate } from "@/lib/router";
 import { authApi } from "@/api/auth";
+import { accessApi } from "@/api/access";
 import { cloudApi, type CloudStackSummary } from "@/api/cloud";
 import { Button } from "@/components/ui/button";
 import {
@@ -241,6 +243,18 @@ export function SidebarCompanyMenu({ open: controlledOpen, onOpenChange }: Sideb
     queryFn: () => authApi.getSession(),
     retry: false,
   });
+  const { data: boardAccess } = useQuery({
+    queryKey: queryKeys.access.currentBoardAccess,
+    queryFn: () => accessApi.getCurrentBoardAccess(),
+    retry: false,
+  });
+  const membership = boardAccess?.memberships?.find((m) => m.companyId === selectedCompany?.id);
+  const isAdmin =
+    Boolean(boardAccess?.isInstanceAdmin) ||
+    boardAccess?.source === "local_implicit" ||
+    membership?.membershipRole === "owner" ||
+    membership?.membershipRole === "admin" ||
+    (!boardAccess && import.meta.env.DEV);
   const currentUserId = session?.user?.id ?? session?.session?.userId ?? null;
   const { orderedCompanies, persistOrder } = useCompanyOrder({
     companies: sidebarCompanies,
@@ -534,6 +548,29 @@ export function SidebarCompanyMenu({ open: controlledOpen, onOpenChange }: Sideb
                     ? `Invite people to ${currentName}`
                     : "Invite people"}
                 </span>
+              </Link>
+            </DropdownMenuItem>
+          ) : null}
+          {isAdmin ? (
+            <DropdownMenuItem
+              asChild
+              disabled={isEditingOrder}
+              className={ORGANIZATION_ACTION_CLASS}
+            >
+              <Link
+                to="/company/settings/instance/observability"
+                onClick={(event) => {
+                  if (isEditingOrder) {
+                    event.preventDefault();
+                    return;
+                  }
+                  closeNavigationChrome();
+                }}
+              >
+                <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground">
+                  <Activity className="size-4" />
+                </span>
+                <span className="min-w-0 flex-1 truncate">Observability</span>
               </Link>
             </DropdownMenuItem>
           ) : null}
