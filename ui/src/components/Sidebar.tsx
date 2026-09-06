@@ -21,9 +21,11 @@ import {
   GanttChartSquare,
   LayoutGrid,
   Users,
+  Activity,
 } from "lucide-react";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { accessApi } from "../api/access";
 import { SidebarSection } from "./SidebarSection";
 import { SidebarNavItem } from "./SidebarNavItem";
 import { SidebarAgents } from "./SidebarAgents";
@@ -54,11 +56,24 @@ export function Sidebar() {
   // one policy across static nav groups and the data-driven sections.
   const [workOpen, setWorkOpen] = useState(true);
   const [organizationOpen, setOrganizationOpen] = useState(true);
+  const [adminOpen, setAdminOpen] = useState(true);
   const { selectedCompanyId, selectedCompany } = useCompany();
   const { collapsed, peeking } = useSidebar();
   const { enabled: streamlinedUiEnabled } = useStreamlinedUiEnabled();
   const rail = collapsed && !peeking;
   const inboxBadge = useInboxBadge(selectedCompanyId);
+  const { data: boardAccess } = useQuery({
+    queryKey: queryKeys.access.currentBoardAccess,
+    queryFn: () => accessApi.getCurrentBoardAccess(),
+    retry: false,
+  });
+  const membership = boardAccess?.memberships?.find((m) => m.companyId === selectedCompanyId);
+  const isAdmin =
+    Boolean(boardAccess?.isInstanceAdmin) ||
+    boardAccess?.source === "local_implicit" ||
+    membership?.membershipRole === "owner" ||
+    membership?.membershipRole === "admin" ||
+    (!boardAccess && import.meta.env.DEV);
   const { data: experimentalSettings } = useQuery({
     queryKey: queryKeys.instance.experimentalSettings,
     queryFn: () => instanceSettingsApi.getExperimental(),
@@ -244,6 +259,24 @@ export function Sidebar() {
           </SidebarSection>
         ) : null}
 
+        {isAdmin ? (
+          <SidebarSection
+            label="Admin"
+            collapsible={{ open: adminOpen, onOpenChange: setAdminOpen }}
+          >
+            <SidebarNavItem
+              to="/company/settings/instance/observability"
+              label="Observability"
+              icon={Activity}
+            />
+            <SidebarNavItem
+              to="/company/settings"
+              label="Settings"
+              icon={Settings}
+            />
+          </SidebarSection>
+        ) : null}
+
         {streamlinedUiEnabled ? (
           <SidebarRecentTasks companyId={selectedCompanyId} liveIssueIds={liveIssueIds} />
         ) : (
@@ -259,7 +292,9 @@ export function Sidebar() {
               <SidebarNavItem to="/timeline" label="Timeline" icon={GanttChartSquare} />
               <SidebarNavItem to="/costs" label="Costs" icon={DollarSign} />
               <SidebarNavItem to="/activity" label="Activity" icon={History} />
-              <SidebarNavItem to="/company/settings" label="Settings" icon={Settings} />
+              {!isAdmin ? (
+                <SidebarNavItem to="/company/settings" label="Settings" icon={Settings} />
+              ) : null}
             </SidebarSection>
           </>
         )}

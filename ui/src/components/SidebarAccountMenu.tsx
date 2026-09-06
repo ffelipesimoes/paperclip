@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  Activity,
   BookOpen,
   Flag,
   LogOut,
@@ -12,9 +13,11 @@ import {
 import type { DeploymentMode } from "@paperclipai/shared";
 import { Link } from "@/lib/router";
 import { authApi } from "@/api/auth";
+import { accessApi } from "@/api/access";
 import { queryKeys } from "@/lib/queryKeys";
 import { useSignOut } from "@/hooks/useSignOut";
 import { useSidebar } from "../context/SidebarContext";
+import { useCompany } from "../context/CompanyContext";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -122,6 +125,19 @@ export function SidebarAccountMenu({
     queryFn: () => authApi.getSession(),
     retry: false,
   });
+  const { selectedCompanyId } = useCompany();
+  const { data: boardAccess } = useQuery({
+    queryKey: queryKeys.access.currentBoardAccess,
+    queryFn: () => accessApi.getCurrentBoardAccess(),
+    retry: false,
+  });
+  const membership = boardAccess?.memberships?.find((m) => m.companyId === selectedCompanyId);
+  const isAdmin =
+    Boolean(boardAccess?.isInstanceAdmin) ||
+    boardAccess?.source === "local_implicit" ||
+    membership?.membershipRole === "owner" ||
+    membership?.membershipRole === "admin" ||
+    (!boardAccess && import.meta.env.DEV);
 
   const signOutMutation = useSignOut({ onSignedOut: closeNavigationChrome });
 
@@ -188,6 +204,14 @@ export function SidebarAccountMenu({
                 href="/company/settings"
                 onClick={closeNavigationChrome}
               />
+              {isAdmin ? (
+                <MenuAction
+                  label="Observability"
+                  icon={Activity}
+                  href="/company/settings/instance/observability"
+                  onClick={closeNavigationChrome}
+                />
+              ) : null}
               <MenuAction
                 label="View profile"
                 icon={UserRound}
