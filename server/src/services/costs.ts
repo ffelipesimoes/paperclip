@@ -145,15 +145,42 @@ export function costService(db: Db, budgetHooks: BudgetServiceHooks = {}) {
       let simulatedCostCents = 0;
       let subscriptionTokens = 0;
       for (const row of modelBreakdown) {
+        const inTok = Number(row.inputTokens) || 0;
+        const cachedInTok = Number(row.cachedInputTokens) || 0;
+        const outTok = Number(row.outputTokens) || 0;
         simulatedCostCents += simulateCostCents({
           model: row.model,
           provider: row.provider,
-          inputTokens: row.inputTokens,
-          cachedInputTokens: row.cachedInputTokens,
-          outputTokens: row.outputTokens,
+          inputTokens: inTok,
+          cachedInputTokens: cachedInTok,
+          outputTokens: outTok,
         });
         if (row.billingType !== METERED_BILLING_TYPE) {
-          subscriptionTokens += row.inputTokens + row.cachedInputTokens + row.outputTokens;
+          subscriptionTokens += inTok + cachedInTok + outTok;
+        }
+      }
+
+      if (simulatedCostCents === 0) {
+        const [tokenRow] = await db
+          .select({
+            inputTokens: sumAsNumber(costEvents.inputTokens),
+            cachedInputTokens: sumAsNumber(costEvents.cachedInputTokens),
+            outputTokens: sumAsNumber(costEvents.outputTokens),
+          })
+          .from(costEvents)
+          .where(and(...conditions));
+        const fallbackIn = Number(tokenRow?.inputTokens) || 0;
+        const fallbackCached = Number(tokenRow?.cachedInputTokens) || 0;
+        const fallbackOut = Number(tokenRow?.outputTokens) || 0;
+        if (fallbackIn > 0 || fallbackCached > 0 || fallbackOut > 0) {
+          simulatedCostCents = simulateCostCents({
+            inputTokens: fallbackIn,
+            cachedInputTokens: fallbackCached,
+            outputTokens: fallbackOut,
+          });
+          if (subscriptionTokens === 0) {
+            subscriptionTokens = fallbackIn + fallbackCached + fallbackOut;
+          }
         }
       }
 

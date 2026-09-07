@@ -205,14 +205,12 @@ export function SidebarAccountMenu({
                 href="/company/settings"
                 onClick={closeNavigationChrome}
               />
-              {isAdmin ? (
-                <MenuAction
-                  label="Observability"
-                  icon={Activity}
-                  href="/company/settings/instance/observability"
-                  onClick={closeNavigationChrome}
-                />
-              ) : null}
+              <MenuAction
+                label="Observability"
+                icon={Activity}
+                href="/company/settings/instance/observability"
+                onClick={closeNavigationChrome}
+              />
               <MenuAction
                 label="View profile"
                 icon={UserRound}

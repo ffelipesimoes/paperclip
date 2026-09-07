@@ -542,25 +542,23 @@ export function SidebarCompanyMenu({ open: controlledOpen, onOpenChange }: Sideb
               </Link>
             </DropdownMenuItem>
           ) : null}
-          {isAdmin ? (
-            <DropdownMenuItem asChild disabled={isEditingOrder} className={ORGANIZATION_ACTION_CLASS}>
-              <Link
-                to="/company/settings/instance/observability"
-                onClick={(event) => {
-                  if (isEditingOrder) {
-                    event.preventDefault();
-                    return;
-                  }
-                  closeNavigationChrome();
-                }}
-              >
-                <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground">
-                  <Activity className="size-4" />
-                </span>
-                <span className="min-w-0 flex-1 truncate">Observability</span>
-              </Link>
-            </DropdownMenuItem>
-          ) : null}
+          <DropdownMenuItem asChild disabled={isEditingOrder} className={ORGANIZATION_ACTION_CLASS}>
+            <Link
+              to="/company/settings/instance/observability"
+              onClick={(event) => {
+                if (isEditingOrder) {
+                  event.preventDefault();
+                  return;
+                }
+                closeNavigationChrome();
+              }}
+            >
+              <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground">
+                <Activity className="size-4" />
+              </span>
+              <span className="min-w-0 flex-1 truncate">Observability</span>
+            </Link>
+          </DropdownMenuItem>
           {session?.session ? (
             <DropdownMenuItem
               className={ORGANIZATION_ACTION_CLASS}
