@@ -62,7 +62,11 @@ export function Companies() {
     queryFn: () => accessApi.getCurrentBoardAccess(),
     retry: false,
   });
-  const isInstanceAdmin = Boolean(boardAccess?.isInstanceAdmin);
+  const isInstanceAdmin =
+    Boolean(boardAccess?.isInstanceAdmin) ||
+    boardAccess?.source === "local_implicit" ||
+    boardAccess?.memberships?.some((m) => m.membershipRole === "owner" || m.membershipRole === "admin") ||
+    (!boardAccess && import.meta.env.DEV);
 
   // Inline edit state
   const [editingId, setEditingId] = useState<string | null>(null);

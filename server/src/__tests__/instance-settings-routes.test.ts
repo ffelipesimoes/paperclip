@@ -1374,5 +1374,30 @@ describe("instance settings routes", () => {
       expect(res.body.companies).toHaveLength(1);
       expect(res.body.companies[0].companyId).toBe("comp-1");
     });
+
+    it("allows company owner board actors and returns aggregated observability summary", async () => {
+      const ownerActor = {
+        type: "board" as const,
+        source: "session" as const,
+        isInstanceAdmin: false,
+        userId: "user-owner",
+        memberships: [{ companyId: "comp-1", membershipRole: "owner", status: "active" }],
+      };
+      const now = new Date();
+      const mockCompanies = [
+        { id: "comp-1", name: "Company 1", status: "active", createdAt: now },
+      ];
+      let selectCallIndex = 0;
+      mockDb.select.mockImplementation(() => {
+        const calls = [mockCompanies, [], [], [], []];
+        const data = calls[selectCallIndex++] ?? [];
+        return createMockSelectChain(data);
+      });
+
+      const app = await createApp(ownerActor);
+      const res = await request(app).get("/api/instance/observability");
+      expect(res.status).toBe(200);
+      expect(res.body.totalCompanies).toBe(1);
+    });
   });
 });
