@@ -156,6 +156,42 @@ export interface CompanyComputeUsage {
   subscriptionRunCount: number;
 }
 
+export interface HostComputeResources {
+  cpuCount: number;
+  cpuModel?: string;
+  loadAvg: [number, number, number];
+  totalMemBytes: number;
+  freeMemBytes: number;
+  usedMemBytes: number;
+  processRssBytes: number;
+  processHeapUsedBytes: number;
+  processHeapTotalBytes: number;
+  uptimeSeconds: number;
+  hostUptimeSeconds: number;
+  activeWorkers: number;
+}
+
+export interface AgentComputeUsage {
+  agentId: string;
+  agentName: string;
+  agentRole: string;
+  agentStatus: string;
+  companyId: string;
+  companyName: string;
+  companyPrefix: string;
+  runCount: number;
+  activeRunCount: number;
+  runtimeMs: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costCents: number;
+  simulatedCostCents: number;
+  avgDurationMs: number;
+  tokensPerSecond: number;
+}
+
 export interface InstanceObservabilitySummary {
   window: string;
   totalCompanies: number;
@@ -166,6 +202,8 @@ export interface InstanceObservabilitySummary {
   totalRuns: number;
   activeRuns: number;
   totalRuntimeMs: number;
+  avgRunDurationMs: number;
+  tokensPerSecond: number;
   inputTokens: number;
   cachedInputTokens: number;
   outputTokens: number;
@@ -174,5 +212,7 @@ export interface InstanceObservabilitySummary {
   simulatedCostCents: number;
   subscriptionTokens: number;
   subscriptionRunCount: number;
+  host?: HostComputeResources;
+  agents: AgentComputeUsage[];
   companies: CompanyComputeUsage[];
 }

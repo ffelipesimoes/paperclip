@@ -96,6 +96,14 @@ export function formatTokens(n: number): string {
   return String(n);
 }
 
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  const clampedIndex = Math.min(Math.max(0, i), units.length - 1);
+  return `${(bytes / Math.pow(1024, clampedIndex)).toFixed(1)} ${units[clampedIndex]}`;
+}
+
 /** Humanize a millisecond duration into a compact `1h 2m`, `45m 12s`, `12s` string. */
 export function formatDurationMs(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return "0s";
