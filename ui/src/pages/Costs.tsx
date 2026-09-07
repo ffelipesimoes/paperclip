@@ -540,6 +540,32 @@ export function Costs({
       0,
     );
 
+  const effectiveSimulatedCostCents = useMemo<number>(() => {
+    if ((spendData?.summary.simulatedCostCents ?? 0) > 0) {
+      return spendData!.summary.simulatedCostCents ?? 0;
+    }
+    const fromByAgent = (spendData?.byAgent ?? []).reduce(
+      (sum, row) => sum + (row.simulatedCostCents ?? 0),
+      0,
+    );
+    if (fromByAgent > 0) return fromByAgent;
+
+    const fromByAgentModel = (spendData?.byAgentModel ?? []).reduce(
+      (sum, row) => sum + (row.simulatedCostCents ?? 0),
+      0,
+    );
+    if (fromByAgentModel > 0) return fromByAgentModel;
+
+    if (inferenceTokenTotal > 0) {
+      // Standard Claude Sonnet simulation (~$3/M input, $15/M output -> avg ~$5/M = 0.0005 cents/token)
+      return Math.max(1, Math.round((inferenceTokenTotal / 1_000_000) * 5.0 * 100));
+    }
+    return 0;
+  }, [spendData, inferenceTokenTotal]);
+
+  const billedSpendCents = spendData?.summary.spendCents ?? 0;
+  const isSubscriptionOnly = billedSpendCents === 0 && effectiveSimulatedCostCents > 0;
+
   const topFinanceEvents = (financeData?.events ?? []) as FinanceEvent[];
   const budgetPolicies = budgetData?.policies ?? [];
   const activeBudgetIncidents = budgetData?.activeIncidents ?? [];
@@ -607,11 +633,11 @@ export function Costs({
 
           <div className="grid gap-3 lg:grid-cols-4">
             <MetricTile
-              label="Inference spend"
-              value={formatCents(spendData?.summary.spendCents ?? 0)}
+              label={isSubscriptionOnly ? "Inference value (sim.)" : "Inference spend"}
+              value={isSubscriptionOnly ? formatCents(effectiveSimulatedCostCents) : formatCents(billedSpendCents)}
               subtitle={
-                (spendData?.summary.simulatedCostCents ?? 0) > 0 && (spendData?.summary.spendCents ?? 0) === 0
-                  ? `${formatTokens(inferenceTokenTotal)} tokens · Sim. value: ${formatCents(spendData?.summary.simulatedCostCents ?? 0)}`
+                isSubscriptionOnly
+                  ? `${formatTokens(inferenceTokenTotal)} tokens · Sim. value ($0 billed)`
                   : `${formatTokens(inferenceTokenTotal)} tokens across request-scoped events`
               }
               icon={DollarSign}
@@ -699,7 +725,10 @@ export function Costs({
                     <div className="flex flex-wrap items-end justify-between gap-3">
                       <div>
                         <div className="text-3xl font-semibold tabular-nums">
-                          {formatCents(spendData?.summary.spendCents ?? 0)}
+                          {isSubscriptionOnly ? formatCents(effectiveSimulatedCostCents) : formatCents(billedSpendCents)}
+                          {isSubscriptionOnly ? (
+                            <span className="ml-2 text-sm font-normal text-muted-foreground">(simulated)</span>
+                          ) : null}
                         </div>
                         <div className="mt-1 text-sm text-muted-foreground">
                           {spendData?.summary.budgetCents && spendData.summary.budgetCents > 0
@@ -712,9 +741,9 @@ export function Costs({
                         <div className="mt-1 text-lg font-medium tabular-nums">
                           {formatTokens(inferenceTokenTotal)}
                         </div>
-                        {((spendData?.summary.subscriptionTokens ?? 0) > 0 || (spendData?.summary.simulatedCostCents ?? 0) > 0) ? (
+                        {(effectiveSimulatedCostCents > 0 || (spendData?.summary.subscriptionTokens ?? 0) > 0) ? (
                           <div className="text-xs text-muted-foreground mt-0.5">
-                            sim. {formatCents(spendData?.summary.simulatedCostCents ?? 0)}
+                            sim. {formatCents(effectiveSimulatedCostCents)}
                           </div>
                         ) : null}
                       </div>
@@ -789,6 +818,10 @@ export function Costs({
                                     <span className="ml-1 text-xs text-muted-foreground font-normal">
                                       (sim. {formatCents(row.simulatedCostCents ?? 0)})
                                     </span>
+                                  ) : row.costCents === 0 && (row.inputTokens + row.cachedInputTokens + row.outputTokens > 0) ? (
+                                    <span className="ml-1 text-xs text-muted-foreground font-normal">
+                                      (sim. {formatCents(Math.max(1, Math.round(((row.inputTokens + row.cachedInputTokens + row.outputTokens) / 1_000_000) * 5.0 * 100)))})
+                                    </span>
                                   ) : null}
                                 </div>
                                 <div className="text-xs text-muted-foreground">
@@ -832,6 +865,8 @@ export function Costs({
                                             <span className="ml-1 font-normal text-muted-foreground">({sharePct}%)</span>
                                           ) : (modelRow.simulatedCostCents ?? 0) > 0 ? (
                                             <span className="ml-1 font-normal text-muted-foreground text-xs">(sim. {formatCents(modelRow.simulatedCostCents ?? 0)})</span>
+                                          ) : (modelRow.inputTokens + modelRow.cachedInputTokens + modelRow.outputTokens > 0) ? (
+                                            <span className="ml-1 font-normal text-muted-foreground text-xs">(sim. {formatCents(Math.max(1, Math.round(((modelRow.inputTokens + modelRow.cachedInputTokens + modelRow.outputTokens) / 1_000_000) * 5.0 * 100)))})</span>
                                           ) : null}
                                         </div>
                                         <div className="text-muted-foreground">

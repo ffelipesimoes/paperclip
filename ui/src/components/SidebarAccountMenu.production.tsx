@@ -194,15 +194,13 @@ export function SidebarAccountMenu({
             </div>
 
             <div className="mt-4 space-y-1">
-              {isAdmin ? (
-                <MenuAction
-                  label="Observability"
-                  description="View instance compute usage and token costs."
-                  icon={Activity}
-                  href="/company/settings/instance/observability"
-                  onClick={closeNavigationChrome}
-                />
-              ) : null}
+              <MenuAction
+                label="Observability"
+                description="View instance compute usage and token costs."
+                icon={Activity}
+                href="/company/settings/instance/observability"
+                onClick={closeNavigationChrome}
+              />
               <MenuAction
                 label="Settings"
                 description="Manage team preferences and integrations."

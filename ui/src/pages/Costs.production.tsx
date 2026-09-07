@@ -34,6 +34,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const NO_COMPANY = "__none__";
+export type CostsMainTab = "overview" | "budgets" | "providers" | "billers" | "finance";
+
+export interface CostsProps {
+  /** Render inside Audit without a second page-level title or breadcrumb. */
+  embedded?: boolean;
+  initialTab?: CostsMainTab;
+  /** Pin the surface to one tab (used by Audit > Budgets). */
+  lockTab?: boolean;
+  /** Budgets is a peer Audit section, so omit it from the Costs sub-navigation. */
+  hideBudgetsTab?: boolean;
+}
 
 function currentWeekRange(): { from: string; to: string } {
   const now = new Date();
@@ -146,14 +157,20 @@ function FinanceSummaryCard({
   );
 }
 
-export function Costs() {
+export function Costs({
+  embedded = false,
+  initialTab = "overview",
+  lockTab = false,
+  hideBudgetsTab = false,
+}: CostsProps = {}) {
   const { selectedCompanyId } = useCompany();
   const { setBreadcrumbs } = useBreadcrumbs();
   const queryClient = useQueryClient();
 
-  const [mainTab, setMainTab] = useState<"overview" | "budgets" | "providers" | "billers" | "finance">("overview");
+  const [mainTab, setMainTab] = useState<CostsMainTab>(initialTab);
   const [activeProvider, setActiveProvider] = useState("all");
   const [activeBiller, setActiveBiller] = useState("all");
+  const showSummaryChrome = !(embedded && lockTab && initialTab === "budgets");
 
   const {
     preset,
@@ -168,8 +185,12 @@ export function Costs() {
   } = useDateRange();
 
   useEffect(() => {
-    setBreadcrumbs([{ label: "Costs" }]);
-  }, [setBreadcrumbs]);
+    if (!embedded) setBreadcrumbs([{ label: "Costs" }]);
+  }, [embedded, setBreadcrumbs]);
+
+  useEffect(() => {
+    setMainTab(initialTab);
+  }, [initialTab]);
 
   const [today, setToday] = useState(() => new Date().toDateString());
   const todayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -240,7 +261,7 @@ export function Costs() {
       ]);
       return { summary, byAgent, byProject, byAgentModel };
     },
-    enabled: !!selectedCompanyId && customReady,
+    enabled: !!selectedCompanyId && customReady && showSummaryChrome,
   });
 
   const { data: financeData, isLoading: financeLoading, error: financeError } = useQuery({
@@ -259,7 +280,7 @@ export function Costs() {
       ]);
       return { summary, byBiller, byKind, events };
     },
-    enabled: !!selectedCompanyId && customReady,
+    enabled: !!selectedCompanyId && customReady && showSummaryChrome,
   });
 
   const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set());
@@ -519,6 +540,32 @@ export function Costs() {
       0,
     );
 
+  const effectiveSimulatedCostCents = useMemo<number>(() => {
+    if ((spendData?.summary.simulatedCostCents ?? 0) > 0) {
+      return spendData!.summary.simulatedCostCents ?? 0;
+    }
+    const fromByAgent = (spendData?.byAgent ?? []).reduce(
+      (sum, row) => sum + (row.simulatedCostCents ?? 0),
+      0,
+    );
+    if (fromByAgent > 0) return fromByAgent;
+
+    const fromByAgentModel = (spendData?.byAgentModel ?? []).reduce(
+      (sum, row) => sum + (row.simulatedCostCents ?? 0),
+      0,
+    );
+    if (fromByAgentModel > 0) return fromByAgentModel;
+
+    if (inferenceTokenTotal > 0) {
+      // Standard Claude Sonnet simulation (~$3/M input, $15/M output -> avg ~$5/M = 0.0005 cents/token)
+      return Math.max(1, Math.round((inferenceTokenTotal / 1_000_000) * 5.0 * 100));
+    }
+    return 0;
+  }, [spendData, inferenceTokenTotal]);
+
+  const billedSpendCents = spendData?.summary.spendCents ?? 0;
+  const isSubscriptionOnly = billedSpendCents === 0 && effectiveSimulatedCostCents > 0;
+
   const topFinanceEvents = (financeData?.events ?? []) as FinanceEvent[];
   const budgetPolicies = budgetData?.policies ?? [];
   const activeBudgetIncidents = budgetData?.activeIncidents ?? [];
@@ -529,22 +576,26 @@ export function Costs() {
   }), [budgetPolicies]);
 
   if (!selectedCompanyId) {
-    return <EmptyState icon={DollarSign} message="Select a company to view costs." />;
+    return <EmptyState icon={DollarSign} message="Select an organization to view costs." />;
   }
 
   const showCustomPrompt = preset === "custom" && !customReady;
   const showOverviewLoading = (spendLoading || financeLoading) && customReady;
   const overviewError = spendError ?? financeError;
-
   return (
     <div className="space-y-6">
-      <div className="space-y-5">
+      {showSummaryChrome ? (
+        <div className="space-y-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
+              {embedded ? (
+                <h2 className="text-lg font-semibold text-foreground">Costs</h2>
+              ) : (
                 <h1 className="text-3xl font-semibold tracking-tight">Costs</h1>
-                <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-                  Inference spend, platform fees, credits, and live quota windows.
-                </p>
+              )}
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+                Inference spend, platform fees, credits, and live quota windows.
+              </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -582,9 +633,13 @@ export function Costs() {
 
           <div className="grid gap-3 lg:grid-cols-4">
             <MetricTile
-              label="Inference spend"
-              value={formatCents(spendData?.summary.spendCents ?? 0)}
-              subtitle={`${formatTokens(inferenceTokenTotal)} tokens across request-scoped events`}
+              label={isSubscriptionOnly ? "Inference value (sim.)" : "Inference spend"}
+              value={isSubscriptionOnly ? formatCents(effectiveSimulatedCostCents) : formatCents(billedSpendCents)}
+              subtitle={
+                isSubscriptionOnly
+                  ? `${formatTokens(inferenceTokenTotal)} tokens · Sim. value ($0 billed)`
+                  : `${formatTokens(inferenceTokenTotal)} tokens across request-scoped events`
+              }
               icon={DollarSign}
             />
             <MetricTile
@@ -616,16 +671,19 @@ export function Costs() {
               icon={ArrowUpRight}
             />
           </div>
-      </div>
+        </div>
+      ) : null}
 
       <Tabs value={mainTab} onValueChange={(value) => setMainTab(value as typeof mainTab)}>
-        <TabsList variant="line" className="justify-start">
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="budgets">Budgets</TabsTrigger>
-          <TabsTrigger value="providers">Providers</TabsTrigger>
-          <TabsTrigger value="billers">Billers</TabsTrigger>
-          <TabsTrigger value="finance">Finance</TabsTrigger>
-        </TabsList>
+        {!lockTab ? (
+          <TabsList variant="line" className="justify-start">
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            {!hideBudgetsTab ? <TabsTrigger value="budgets">Budgets</TabsTrigger> : null}
+            <TabsTrigger value="providers">Providers</TabsTrigger>
+            <TabsTrigger value="billers">Billers</TabsTrigger>
+            <TabsTrigger value="finance">Finance</TabsTrigger>
+          </TabsList>
+        ) : null}
 
         <TabsContent value="overview" className="mt-4 space-y-4">
           {showCustomPrompt ? (
@@ -667,7 +725,10 @@ export function Costs() {
                     <div className="flex flex-wrap items-end justify-between gap-3">
                       <div>
                         <div className="text-3xl font-semibold tabular-nums">
-                          {formatCents(spendData?.summary.spendCents ?? 0)}
+                          {isSubscriptionOnly ? formatCents(effectiveSimulatedCostCents) : formatCents(billedSpendCents)}
+                          {isSubscriptionOnly ? (
+                            <span className="ml-2 text-sm font-normal text-muted-foreground">(simulated)</span>
+                          ) : null}
                         </div>
                         <div className="mt-1 text-sm text-muted-foreground">
                           {spendData?.summary.budgetCents && spendData.summary.budgetCents > 0
@@ -680,6 +741,11 @@ export function Costs() {
                         <div className="mt-1 text-lg font-medium tabular-nums">
                           {formatTokens(inferenceTokenTotal)}
                         </div>
+                        {(effectiveSimulatedCostCents > 0 || (spendData?.summary.subscriptionTokens ?? 0) > 0) ? (
+                          <div className="text-xs text-muted-foreground mt-0.5">
+                            sim. {formatCents(effectiveSimulatedCostCents)}
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                     {spendData?.summary.budgetCents && spendData.summary.budgetCents > 0 ? (
@@ -746,7 +812,18 @@ export function Costs() {
                                 {row.agentStatus === "terminated" ? <StatusBadge status="terminated" /> : null}
                               </div>
                               <div className="text-right text-sm tabular-nums">
-                                <div className="font-medium">{formatCents(row.costCents)}</div>
+                                <div className="font-medium">
+                                  {formatCents(row.costCents)}
+                                  {row.costCents === 0 && (row.simulatedCostCents ?? 0) > 0 ? (
+                                    <span className="ml-1 text-xs text-muted-foreground font-normal">
+                                      (sim. {formatCents(row.simulatedCostCents ?? 0)})
+                                    </span>
+                                  ) : row.costCents === 0 && (row.inputTokens + row.cachedInputTokens + row.outputTokens > 0) ? (
+                                    <span className="ml-1 text-xs text-muted-foreground font-normal">
+                                      (sim. {formatCents(Math.max(1, Math.round(((row.inputTokens + row.cachedInputTokens + row.outputTokens) / 1_000_000) * 5.0 * 100)))})
+                                    </span>
+                                  ) : null}
+                                </div>
                                 <div className="text-xs text-muted-foreground">
                                   in {formatTokens(row.inputTokens + row.cachedInputTokens)} · out {formatTokens(row.outputTokens)}
                                 </div>
@@ -784,7 +861,13 @@ export function Costs() {
                                       <div className="text-right tabular-nums">
                                         <div className="font-medium">
                                           {formatCents(modelRow.costCents)}
-                                          <span className="ml-1 font-normal text-muted-foreground">({sharePct}%)</span>
+                                          {modelRow.costCents > 0 ? (
+                                            <span className="ml-1 font-normal text-muted-foreground">({sharePct}%)</span>
+                                          ) : (modelRow.simulatedCostCents ?? 0) > 0 ? (
+                                            <span className="ml-1 font-normal text-muted-foreground text-xs">(sim. {formatCents(modelRow.simulatedCostCents ?? 0)})</span>
+                                          ) : (modelRow.inputTokens + modelRow.cachedInputTokens + modelRow.outputTokens > 0) ? (
+                                            <span className="ml-1 font-normal text-muted-foreground text-xs">(sim. {formatCents(Math.max(1, Math.round(((modelRow.inputTokens + modelRow.cachedInputTokens + modelRow.outputTokens) / 1_000_000) * 5.0 * 100)))})</span>
+                                          ) : null}
                                         </div>
                                         <div className="text-muted-foreground">
                                           {formatTokens(modelRow.inputTokens + modelRow.cachedInputTokens + modelRow.outputTokens)} tok
@@ -908,10 +991,10 @@ export function Costs() {
                   return (
                     <section key={scopeType} className="space-y-3">
                       <div>
-                        <h2 className="text-lg font-semibold capitalize">{scopeType} budgets</h2>
+                        <h2 className="text-lg font-semibold capitalize">{scopeType === "company" ? "organization" : scopeType} budgets</h2>
                         <p className="text-sm text-muted-foreground">
                           {scopeType === "company"
-                            ? "Company-wide monthly policy."
+                            ? "Organization-wide monthly policy."
                             : scopeType === "agent"
                               ? "Recurring monthly spend policies for individual agents."
                               : "Lifetime spend policies for execution-bound projects."}
@@ -940,7 +1023,7 @@ export function Costs() {
                 {budgetPolicies.length === 0 ? (
                   <Card>
                     <CardContent className="px-5 py-8 text-sm text-muted-foreground">
-                      No budget policies yet. Set agent and project budgets from their detail pages, or use the existing company monthly budget control.
+                      No budget policies yet. Set agent and project budgets from their detail pages, or use the existing organization monthly budget control.
                     </CardContent>
                   </Card>
                 ) : null}

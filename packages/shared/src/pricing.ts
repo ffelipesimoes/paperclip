@@ -56,9 +56,9 @@ export function simulateCostUsd(input: {
   outputTokens: number;
 }): number {
   const pricing = resolveModelPricing(input.model ?? "", input.provider ?? "");
-  const inputTokens = Math.max(0, input.inputTokens || 0);
-  const cachedInputTokens = Math.max(0, input.cachedInputTokens || 0);
-  const outputTokens = Math.max(0, input.outputTokens || 0);
+  const inputTokens = Math.max(0, Number(input.inputTokens) || 0);
+  const cachedInputTokens = Math.max(0, Number(input.cachedInputTokens) || 0);
+  const outputTokens = Math.max(0, Number(input.outputTokens) || 0);
 
   const inputUsd = (inputTokens / 1_000_000) * pricing.inputPerMillionUsd;
   const cachedUsd = (cachedInputTokens / 1_000_000) * pricing.cachedInputPerMillionUsd;
