@@ -1,5 +1,6 @@
 import { Router, type Request } from "express";
-import { and, count, desc, gte, isNull, sql } from "drizzle-orm";
+import os from "node:os";
+import { and, count, desc, eq, gte, isNull, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import {
   agents,
@@ -14,7 +15,9 @@ import {
   patchInstanceGeneralSettingsSchema,
   startTaskDrainRequestSchema,
   simulateCostCents,
+  type AgentComputeUsage,
   type CompanyComputeUsage,
+  type HostComputeResources,
   type InstanceObservabilitySummary,
 } from "@paperclipai/shared";
 import { forbidden } from "../errors.js";
@@ -437,7 +440,16 @@ export function instanceSettingsRoutes(db: Db) {
       costConditions.push(gte(costEvents.occurredAt, since));
     }
 
-    const [allCompanies, agentRows, issueRows, runRows, costRows] = await Promise.all([
+    const [
+      allCompanies,
+      agentRows,
+      issueRows,
+      runRows,
+      costRows,
+      allAgentsList,
+      agentRunRows,
+      agentCostRows,
+    ] = await Promise.all([
       db
         .select({
           id: companies.id,
@@ -489,6 +501,41 @@ export function instanceSettingsRoutes(db: Db) {
         .from(costEvents)
         .where(costConditions.length > 0 ? and(...costConditions) : undefined)
         .groupBy(costEvents.companyId, costEvents.model, costEvents.provider, costEvents.billingType),
+      db
+        .select({
+          id: agents.id,
+          name: agents.name,
+          role: agents.role,
+          status: agents.status,
+          companyId: agents.companyId,
+          companyName: companies.name,
+          companyPrefix: companies.issuePrefix,
+        })
+        .from(agents)
+        .innerJoin(companies, eq(agents.companyId, companies.id)),
+      db
+        .select({
+          agentId: heartbeatRuns.agentId,
+          runCount: sql<number>`count(*)::int`,
+          activeRunCount: sql<number>`count(case when ${heartbeatRuns.status} = 'running' then 1 end)::int`,
+          runtimeMs: sql<number>`coalesce(sum(case when ${heartbeatRuns.startedAt} is not null then extract(epoch from (coalesce(${heartbeatRuns.finishedAt}, now()) - ${heartbeatRuns.startedAt})) * 1000 else 0 end), 0)::double precision`,
+        })
+        .from(heartbeatRuns)
+        .where(runConditions.length > 0 ? and(...runConditions) : undefined)
+        .groupBy(heartbeatRuns.agentId),
+      db
+        .select({
+          agentId: costEvents.agentId,
+          model: costEvents.model,
+          provider: costEvents.provider,
+          costCents: sql<number>`coalesce(sum(${costEvents.costCents}), 0)::double precision`,
+          inputTokens: sql<number>`coalesce(sum(${costEvents.inputTokens}), 0)::double precision`,
+          cachedInputTokens: sql<number>`coalesce(sum(${costEvents.cachedInputTokens}), 0)::double precision`,
+          outputTokens: sql<number>`coalesce(sum(${costEvents.outputTokens}), 0)::double precision`,
+        })
+        .from(costEvents)
+        .where(costConditions.length > 0 ? and(...costConditions) : undefined)
+        .groupBy(costEvents.agentId, costEvents.model, costEvents.provider),
     ]);
 
     const companyMap = new Map<string, CompanyComputeUsage>();
@@ -571,6 +618,106 @@ export function instanceSettingsRoutes(db: Db) {
     const companyList = Array.from(companyMap.values());
     companyList.sort((a, b) => b.totalTokens - a.totalTokens || b.runtimeMs - a.runtimeMs);
 
+    const agentMap = new Map<string, AgentComputeUsage>();
+    for (const a of allAgentsList) {
+      agentMap.set(a.id, {
+        agentId: a.id,
+        agentName: a.name,
+        agentRole: a.role,
+        agentStatus: a.status,
+        companyId: a.companyId,
+        companyName: a.companyName,
+        companyPrefix: a.companyPrefix,
+        runCount: 0,
+        activeRunCount: 0,
+        runtimeMs: 0,
+        inputTokens: 0,
+        cachedInputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        costCents: 0,
+        simulatedCostCents: 0,
+        avgDurationMs: 0,
+        tokensPerSecond: 0,
+      });
+    }
+
+    for (const row of agentRunRows) {
+      if (!row.agentId) continue;
+      const item = agentMap.get(row.agentId);
+      if (item) {
+        item.runCount = Number(row.runCount ?? 0);
+        item.activeRunCount = Number(row.activeRunCount ?? 0);
+        item.runtimeMs = Number(row.runtimeMs ?? 0);
+      }
+    }
+
+    for (const row of agentCostRows) {
+      if (!row.agentId) continue;
+      const item = agentMap.get(row.agentId);
+      if (item) {
+        const inTok = Number(row.inputTokens ?? 0);
+        const cacheTok = Number(row.cachedInputTokens ?? 0);
+        const outTok = Number(row.outputTokens ?? 0);
+        const costC = Number(row.costCents ?? 0);
+        const simC = simulateCostCents({
+          model: row.model,
+          provider: row.provider,
+          inputTokens: inTok,
+          cachedInputTokens: cacheTok,
+          outputTokens: outTok,
+        });
+
+        item.inputTokens += inTok;
+        item.cachedInputTokens += cacheTok;
+        item.outputTokens += outTok;
+        item.totalTokens += inTok + cacheTok + outTok;
+        item.costCents += costC;
+        item.simulatedCostCents += simC;
+      }
+    }
+
+    for (const item of agentMap.values()) {
+      if (item.runCount > 0) {
+        item.avgDurationMs = Math.round(item.runtimeMs / item.runCount);
+      }
+      if (item.runtimeMs > 0) {
+        item.tokensPerSecond = Math.round((item.totalTokens / (item.runtimeMs / 1000)) * 100) / 100;
+      }
+    }
+
+    const agentList = Array.from(agentMap.values());
+    agentList.sort((a, b) => b.totalTokens - a.totalTokens || b.runtimeMs - a.runtimeMs || b.runCount - a.runCount);
+
+    const totalRuns = companyList.reduce((acc, c) => acc + c.runCount, 0);
+    const activeRuns = companyList.reduce((acc, c) => acc + c.activeRunCount, 0);
+    const totalRuntimeMs = companyList.reduce((acc, c) => acc + c.runtimeMs, 0);
+    const totalTokens = companyList.reduce((acc, c) => acc + c.totalTokens, 0);
+    const avgRunDurationMs = totalRuns > 0 ? Math.round(totalRuntimeMs / totalRuns) : 0;
+    const tokensPerSecond = totalRuntimeMs > 0 ? Math.round((totalTokens / (totalRuntimeMs / 1000)) * 100) / 100 : 0;
+
+    const cpus = os.cpus();
+    const totalMemBytes = os.totalmem();
+    const freeMemBytes = os.freemem();
+    const usedMemBytes = Math.max(0, totalMemBytes - freeMemBytes);
+    const loadAvg = os.loadavg() as [number, number, number];
+    const memUsage = process.memoryUsage();
+
+    const host: HostComputeResources = {
+      cpuCount: cpus.length,
+      cpuModel: cpus[0]?.model,
+      loadAvg,
+      totalMemBytes,
+      freeMemBytes,
+      usedMemBytes,
+      processRssBytes: memUsage.rss,
+      processHeapUsedBytes: memUsage.heapUsed,
+      processHeapTotalBytes: memUsage.heapTotal,
+      uptimeSeconds: Math.round(process.uptime()),
+      hostUptimeSeconds: Math.round(os.uptime()),
+      activeWorkers: activeRuns,
+    };
+
     const summary: InstanceObservabilitySummary = {
       window: windowParam,
       totalCompanies: allCompanies.length,
@@ -578,17 +725,21 @@ export function instanceSettingsRoutes(db: Db) {
       totalAgents: companyList.reduce((acc, c) => acc + c.agentCount, 0),
       activeAgents: companyList.reduce((acc, c) => acc + c.activeAgentCount, 0),
       totalIssues: companyList.reduce((acc, c) => acc + c.issueCount, 0),
-      totalRuns: companyList.reduce((acc, c) => acc + c.runCount, 0),
-      activeRuns: companyList.reduce((acc, c) => acc + c.activeRunCount, 0),
-      totalRuntimeMs: companyList.reduce((acc, c) => acc + c.runtimeMs, 0),
+      totalRuns,
+      activeRuns,
+      totalRuntimeMs,
+      avgRunDurationMs,
+      tokensPerSecond,
       inputTokens: companyList.reduce((acc, c) => acc + c.inputTokens, 0),
       cachedInputTokens: companyList.reduce((acc, c) => acc + c.cachedInputTokens, 0),
       outputTokens: companyList.reduce((acc, c) => acc + c.outputTokens, 0),
-      totalTokens: companyList.reduce((acc, c) => acc + c.totalTokens, 0),
+      totalTokens,
       billedCostCents: companyList.reduce((acc, c) => acc + c.costCents, 0),
       simulatedCostCents: companyList.reduce((acc, c) => acc + c.simulatedCostCents, 0),
       subscriptionTokens: companyList.reduce((acc, c) => acc + c.subscriptionTokens, 0),
       subscriptionRunCount: companyList.reduce((acc, c) => acc + c.subscriptionRunCount, 0),
+      host,
+      agents: agentList,
       companies: companyList,
     };
 

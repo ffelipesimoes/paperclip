@@ -1225,6 +1225,8 @@ export type {
   CostByProject,
   CompanyComputeUsage,
   InstanceObservabilitySummary,
+  HostComputeResources,
+  AgentComputeUsage,
   FinanceEvent,
   FinanceSummary,
   FinanceByBiller,
