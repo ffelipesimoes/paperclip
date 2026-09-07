@@ -2884,12 +2884,28 @@ export function accessRoutes(
       throw unauthorized("Board authentication required");
     }
     const accessSnapshot = await boardAuth.resolveBoardAccess(req.actor.userId);
+    const membershipsMap = new Map<string, { companyId: string; membershipRole?: string | null; status?: string }>();
+    for (const m of accessSnapshot.memberships ?? []) {
+      membershipsMap.set(m.companyId, m);
+    }
+    for (const m of req.actor.memberships ?? []) {
+      membershipsMap.set(m.companyId, m);
+    }
+    const memberships = Array.from(membershipsMap.values());
+    const companyIds = Array.from(
+      new Set([...accessSnapshot.companyIds, ...(req.actor.companyIds ?? [])]),
+    );
+    const isInstanceAdmin = Boolean(
+      accessSnapshot.isInstanceAdmin ||
+      req.actor.isInstanceAdmin,
+    );
+
     res.json({
-      user: accessSnapshot.user,
+      user: accessSnapshot.user ?? (req.actor.userName ? { id: req.actor.userId, name: req.actor.userName, email: req.actor.userEmail ?? null, image: null } : null),
       userId: req.actor.userId,
-      isInstanceAdmin: accessSnapshot.isInstanceAdmin,
-      companyIds: accessSnapshot.companyIds,
-      memberships: accessSnapshot.memberships,
+      isInstanceAdmin,
+      companyIds,
+      memberships,
       source: req.actor.source ?? "none",
       keyId: req.actor.source === "board_key" ? req.actor.keyId ?? null : null,
     });

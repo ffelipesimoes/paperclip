@@ -135,6 +135,7 @@ export function SidebarAccountMenu({
   const isAdmin =
     Boolean(boardAccess?.isInstanceAdmin) ||
     boardAccess?.source === "local_implicit" ||
+    boardAccess?.memberships?.some((m) => m.membershipRole === "owner" || m.membershipRole === "admin") ||
     membership?.membershipRole === "owner" ||
     membership?.membershipRole === "admin" ||
     (!boardAccess && import.meta.env.DEV);

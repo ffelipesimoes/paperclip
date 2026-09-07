@@ -92,7 +92,11 @@ function assertCanManageInstanceSettings(req: Request) {
   if (req.actor.type !== "board") {
     throw forbidden("Board access required");
   }
-  if (req.actor.source === "local_implicit" || req.actor.isInstanceAdmin) {
+  if (
+    req.actor.source === "local_implicit" ||
+    req.actor.isInstanceAdmin ||
+    req.actor.memberships?.some((m) => m.membershipRole === "owner" || m.membershipRole === "admin")
+  ) {
     return;
   }
   throw forbidden("Instance admin access required");
