@@ -422,4 +422,37 @@ describe.sequential("cli auth routes", () => {
     expect(mockBoardAuthService.getBoardApiKeyForUser).not.toHaveBeenCalled();
     expect(mockBoardAuthService.revokeBoardApiKey).not.toHaveBeenCalled();
   });
+
+  it.sequential("returns current board access with merged memberships from actor", async () => {
+    mockBoardAuthService.resolveBoardAccess.mockResolvedValue({
+      user: { id: "user-1", name: "Alice", email: "alice@example.com" },
+      companyIds: ["company-1"],
+      memberships: [{ companyId: "company-1", membershipRole: "owner", status: "active" }],
+      isInstanceAdmin: false,
+    });
+
+    const app = await createApp({
+      type: "board",
+      userId: "user-1",
+      userName: "Alice",
+      source: "session",
+      isInstanceAdmin: false,
+      companyIds: ["company-1", "company-2"],
+      memberships: [
+        { companyId: "company-1", membershipRole: "owner", status: "active" },
+        { companyId: "company-2", membershipRole: "owner", status: "active" },
+      ],
+    });
+
+    const res = await request(app).get("/api/cli-auth/me");
+    expect(res.status).toBe(200);
+    expect(res.body.userId).toBe("user-1");
+    expect(res.body.memberships).toHaveLength(2);
+    expect(res.body.memberships).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ companyId: "company-1", membershipRole: "owner" }),
+        expect.objectContaining({ companyId: "company-2", membershipRole: "owner" }),
+      ]),
+    );
+  });
 });

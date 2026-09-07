@@ -28,6 +28,8 @@ export function ToolsAdminGate({ children }: { children: ReactNode }) {
   const membership = data?.memberships?.find((m) => m.companyId === selectedCompanyId);
   const isAdmin =
     Boolean(data?.isInstanceAdmin) ||
+    data?.source === "local_implicit" ||
+    data?.memberships?.some((m) => m.membershipRole === "owner" || m.membershipRole === "admin") ||
     membership?.membershipRole === "owner" ||
     membership?.membershipRole === "admin";
 
