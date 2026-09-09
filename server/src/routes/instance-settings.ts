@@ -433,6 +433,12 @@ export function instanceSettingsRoutes(db: Db) {
   router.get("/instance/observability", async (req, res) => {
     assertCanManageInstanceSettings(req);
     const windowParam = typeof req.query.window === "string" ? req.query.window.toLowerCase() : "all";
+    const companyIdParam =
+      typeof req.query.companyId === "string" &&
+      req.query.companyId !== "all" &&
+      req.query.companyId.trim()
+        ? req.query.companyId.trim()
+        : null;
     let since: Date | null = null;
     if (windowParam === "24h") {
       since = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -442,11 +448,23 @@ export function instanceSettingsRoutes(db: Db) {
       since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     }
 
-    const runConditions = [];
-    const costConditions = [];
+    const windowRunConditions = [];
+    const windowCostConditions = [];
     if (since) {
-      runConditions.push(gte(heartbeatRuns.startedAt, since));
-      costConditions.push(gte(costEvents.occurredAt, since));
+      windowRunConditions.push(gte(heartbeatRuns.startedAt, since));
+      windowCostConditions.push(gte(costEvents.occurredAt, since));
+    }
+
+    const scopedRunConditions = [...windowRunConditions];
+    const scopedCostConditions = [...windowCostConditions];
+    if (companyIdParam) {
+      scopedRunConditions.push(eq(heartbeatRuns.companyId, companyIdParam));
+      scopedCostConditions.push(eq(costEvents.companyId, companyIdParam));
+    }
+
+    const agentConditions = [];
+    if (companyIdParam) {
+      agentConditions.push(eq(agents.companyId, companyIdParam));
     }
 
     const [
@@ -496,7 +514,7 @@ export function instanceSettingsRoutes(db: Db) {
           runtimeMs: sql<number>`coalesce(sum(case when ${heartbeatRuns.startedAt} is not null then extract(epoch from (coalesce(${heartbeatRuns.finishedAt}, now()) - ${heartbeatRuns.startedAt})) * 1000 else 0 end), 0)::double precision`,
         })
         .from(heartbeatRuns)
-        .where(runConditions.length > 0 ? and(...runConditions) : undefined)
+        .where(windowRunConditions.length > 0 ? and(...windowRunConditions) : undefined)
         .groupBy(heartbeatRuns.companyId),
       db
         .select({
@@ -511,7 +529,7 @@ export function instanceSettingsRoutes(db: Db) {
           subscriptionRunCount: sql<number>`count(distinct case when ${costEvents.billingType} in ('subscription_included', 'subscription_overage') then ${costEvents.heartbeatRunId} end)::int`,
         })
         .from(costEvents)
-        .where(costConditions.length > 0 ? and(...costConditions) : undefined)
+        .where(windowCostConditions.length > 0 ? and(...windowCostConditions) : undefined)
         .groupBy(costEvents.companyId, costEvents.model, costEvents.provider, costEvents.billingType),
       db
         .select({
@@ -524,7 +542,8 @@ export function instanceSettingsRoutes(db: Db) {
           companyPrefix: companies.issuePrefix,
         })
         .from(agents)
-        .innerJoin(companies, eq(agents.companyId, companies.id)),
+        .innerJoin(companies, eq(agents.companyId, companies.id))
+        .where(agentConditions.length > 0 ? and(...agentConditions) : undefined),
       db
         .select({
           agentId: heartbeatRuns.agentId,
@@ -533,7 +552,7 @@ export function instanceSettingsRoutes(db: Db) {
           runtimeMs: sql<number>`coalesce(sum(case when ${heartbeatRuns.startedAt} is not null then extract(epoch from (coalesce(${heartbeatRuns.finishedAt}, now()) - ${heartbeatRuns.startedAt})) * 1000 else 0 end), 0)::double precision`,
         })
         .from(heartbeatRuns)
-        .where(runConditions.length > 0 ? and(...runConditions) : undefined)
+        .where(scopedRunConditions.length > 0 ? and(...scopedRunConditions) : undefined)
         .groupBy(heartbeatRuns.agentId),
       db
         .select({
@@ -546,7 +565,7 @@ export function instanceSettingsRoutes(db: Db) {
           outputTokens: sql<number>`coalesce(sum(${costEvents.outputTokens}), 0)::double precision`,
         })
         .from(costEvents)
-        .where(costConditions.length > 0 ? and(...costConditions) : undefined)
+        .where(scopedCostConditions.length > 0 ? and(...scopedCostConditions) : undefined)
         .groupBy(costEvents.agentId, costEvents.model, costEvents.provider),
       db
         .select({
@@ -559,7 +578,7 @@ export function instanceSettingsRoutes(db: Db) {
           outputTokens: sql<number>`coalesce(sum(${costEvents.outputTokens}), 0)::double precision`,
         })
         .from(costEvents)
-        .where(costConditions.length > 0 ? and(...costConditions) : undefined)
+        .where(scopedCostConditions.length > 0 ? and(...scopedCostConditions) : undefined)
         .groupBy(sql`1`, costEvents.model, costEvents.provider)
         .orderBy(sql`1 asc`),
       db
@@ -569,7 +588,7 @@ export function instanceSettingsRoutes(db: Db) {
           runtimeMs: sql<number>`coalesce(sum(case when ${heartbeatRuns.startedAt} is not null then extract(epoch from (coalesce(${heartbeatRuns.finishedAt}, now()) - ${heartbeatRuns.startedAt})) * 1000 else 0 end), 0)::double precision`,
         })
         .from(heartbeatRuns)
-        .where(runConditions.length > 0 ? and(...runConditions) : undefined)
+        .where(scopedRunConditions.length > 0 ? and(...scopedRunConditions) : undefined)
         .groupBy(sql`1`)
         .orderBy(sql`1 asc`),
       db
@@ -599,7 +618,7 @@ export function instanceSettingsRoutes(db: Db) {
         .innerJoin(issues, eq(costEvents.issueId, issues.id))
         .innerJoin(companies, eq(costEvents.companyId, companies.id))
         .innerJoin(agents, eq(costEvents.agentId, agents.id))
-        .where(costConditions.length > 0 ? and(...costConditions) : undefined)
+        .where(scopedCostConditions.length > 0 ? and(...scopedCostConditions) : undefined)
         .groupBy(
           costEvents.issueId,
           issues.title,
@@ -697,36 +716,38 @@ export function instanceSettingsRoutes(db: Db) {
         item.subscriptionRunCount += Number(row.subscriptionRunCount ?? 0);
       }
 
-      // Model breakdown accumulation
-      const modelKey = `${row.provider}:${row.model}`;
-      let modelUsage = modelMap.get(modelKey);
-      if (!modelUsage) {
-        modelUsage = {
+      // Model breakdown and cache savings accumulation (scoped to selected company if companyIdParam is present)
+      if (!companyIdParam || row.companyId === companyIdParam) {
+        const modelKey = `${row.provider}:${row.model}`;
+        let modelUsage = modelMap.get(modelKey);
+        if (!modelUsage) {
+          modelUsage = {
+            model: row.model,
+            provider: row.provider,
+            inputTokens: 0,
+            cachedInputTokens: 0,
+            outputTokens: 0,
+            totalTokens: 0,
+            costCents: 0,
+            simulatedCostCents: 0,
+            percentage: 0,
+          };
+          modelMap.set(modelKey, modelUsage);
+        }
+        modelUsage.inputTokens += inTok;
+        modelUsage.cachedInputTokens += cacheTok;
+        modelUsage.outputTokens += outTok;
+        modelUsage.totalTokens += inTok + cacheTok + outTok;
+        modelUsage.costCents += costC;
+        modelUsage.simulatedCostCents += simC;
+
+        // Cache savings accumulation
+        simulatedCacheSavingsCents += simulateCacheSavingsCents({
           model: row.model,
           provider: row.provider,
-          inputTokens: 0,
-          cachedInputTokens: 0,
-          outputTokens: 0,
-          totalTokens: 0,
-          costCents: 0,
-          simulatedCostCents: 0,
-          percentage: 0,
-        };
-        modelMap.set(modelKey, modelUsage);
+          cachedInputTokens: cacheTok,
+        });
       }
-      modelUsage.inputTokens += inTok;
-      modelUsage.cachedInputTokens += cacheTok;
-      modelUsage.outputTokens += outTok;
-      modelUsage.totalTokens += inTok + cacheTok + outTok;
-      modelUsage.costCents += costC;
-      modelUsage.simulatedCostCents += simC;
-
-      // Cache savings accumulation
-      simulatedCacheSavingsCents += simulateCacheSavingsCents({
-        model: row.model,
-        provider: row.provider,
-        cachedInputTokens: cacheTok,
-      });
     }
 
     const companyList = Array.from(companyMap.values());
@@ -803,13 +824,21 @@ export function instanceSettingsRoutes(db: Db) {
     const agentList = Array.from(agentMap.values());
     agentList.sort((a, b) => b.totalTokens - a.totalTokens || b.runtimeMs - a.runtimeMs || b.runCount - a.runCount);
 
-    const totalRuns = companyList.reduce((acc, c) => acc + c.runCount, 0);
-    const activeRuns = companyList.reduce((acc, c) => acc + c.activeRunCount, 0);
-    const totalRuntimeMs = companyList.reduce((acc, c) => acc + c.runtimeMs, 0);
-    const totalInputTokens = companyList.reduce((acc, c) => acc + c.inputTokens, 0);
-    const totalCachedTokens = companyList.reduce((acc, c) => acc + c.cachedInputTokens, 0);
-    const totalOutputTokens = companyList.reduce((acc, c) => acc + c.outputTokens, 0);
-    const totalTokens = companyList.reduce((acc, c) => acc + c.totalTokens, 0);
+    const targetCompanies = companyIdParam
+      ? companyList.filter((c) => c.companyId === companyIdParam)
+      : companyList;
+
+    const totalRuns = targetCompanies.reduce((acc, c) => acc + c.runCount, 0);
+    const activeRuns = targetCompanies.reduce((acc, c) => acc + c.activeRunCount, 0);
+    const totalRuntimeMs = targetCompanies.reduce((acc, c) => acc + c.runtimeMs, 0);
+    const totalInputTokens = targetCompanies.reduce((acc, c) => acc + c.inputTokens, 0);
+    const totalCachedTokens = targetCompanies.reduce((acc, c) => acc + c.cachedInputTokens, 0);
+    const totalOutputTokens = targetCompanies.reduce((acc, c) => acc + c.outputTokens, 0);
+    const totalTokens = targetCompanies.reduce((acc, c) => acc + c.totalTokens, 0);
+    const billedCostCents = targetCompanies.reduce((acc, c) => acc + c.costCents, 0);
+    const simulatedCostCents = targetCompanies.reduce((acc, c) => acc + c.simulatedCostCents, 0);
+    const subscriptionTokens = targetCompanies.reduce((acc, c) => acc + c.subscriptionTokens, 0);
+    const subscriptionRunCount = targetCompanies.reduce((acc, c) => acc + c.subscriptionRunCount, 0);
     const avgRunDurationMs = totalRuns > 0 ? Math.round(totalRuntimeMs / totalRuns) : 0;
     const tokensPerSecond = totalRuntimeMs > 0 ? Math.round((totalTokens / (totalRuntimeMs / 1000)) * 100) / 100 : 0;
 
@@ -994,11 +1023,12 @@ export function instanceSettingsRoutes(db: Db) {
 
     const summary: InstanceObservabilitySummary = {
       window: windowParam,
+      selectedCompanyId: companyIdParam ?? "all",
       totalCompanies: allCompanies.length,
       activeCompanies: allCompanies.filter((c) => c.status === "active").length,
-      totalAgents: companyList.reduce((acc, c) => acc + c.agentCount, 0),
-      activeAgents: companyList.reduce((acc, c) => acc + c.activeAgentCount, 0),
-      totalIssues: companyList.reduce((acc, c) => acc + c.issueCount, 0),
+      totalAgents: targetCompanies.reduce((acc, c) => acc + c.agentCount, 0),
+      activeAgents: targetCompanies.reduce((acc, c) => acc + c.activeAgentCount, 0),
+      totalIssues: targetCompanies.reduce((acc, c) => acc + c.issueCount, 0),
       totalRuns,
       activeRuns,
       totalRuntimeMs,
@@ -1010,10 +1040,10 @@ export function instanceSettingsRoutes(db: Db) {
       totalTokens,
       cacheHitRate,
       simulatedCacheSavingsCents,
-      billedCostCents: companyList.reduce((acc, c) => acc + c.costCents, 0),
-      simulatedCostCents: companyList.reduce((acc, c) => acc + c.simulatedCostCents, 0),
-      subscriptionTokens: companyList.reduce((acc, c) => acc + c.subscriptionTokens, 0),
-      subscriptionRunCount: companyList.reduce((acc, c) => acc + c.subscriptionRunCount, 0),
+      billedCostCents,
+      simulatedCostCents,
+      subscriptionTokens,
+      subscriptionRunCount,
       host,
       models: modelList,
       timeline,

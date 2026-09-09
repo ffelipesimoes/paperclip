@@ -23,8 +23,13 @@ export const instanceSettingsApi = {
     api.get<InstanceExperimentalSettingsWithManaged>("/instance/settings/experimental"),
   updateExperimental: (patch: PatchInstanceExperimentalSettings) =>
     api.patch<InstanceExperimentalSettingsWithManaged>("/instance/settings/experimental", patch),
-  getObservability: (window?: string) =>
-    api.get<InstanceObservabilitySummary>(window ? `/instance/observability?window=${encodeURIComponent(window)}` : "/instance/observability"),
+  getObservability: (window?: string, companyId?: string) => {
+    const params = new URLSearchParams();
+    if (window) params.set("window", window);
+    if (companyId && companyId !== "all") params.set("companyId", companyId);
+    const qs = params.toString();
+    return api.get<InstanceObservabilitySummary>(qs ? `/instance/observability?${qs}` : "/instance/observability");
+  },
   getRunTrace: (runId: string) =>
     api.get<AgentRunTrace>(`/instance/observability/runs/${encodeURIComponent(runId)}/trace`),
 };

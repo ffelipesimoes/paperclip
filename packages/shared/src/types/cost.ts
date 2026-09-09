@@ -291,6 +291,7 @@ export interface AgentComputeUsage {
 
 export interface InstanceObservabilitySummary {
   window: string;
+  selectedCompanyId?: string | null;
   totalCompanies: number;
   activeCompanies: number;
   totalAgents: number;

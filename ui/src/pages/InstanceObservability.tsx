@@ -7,6 +7,7 @@ import {
   Bot,
   Building2,
   Calendar,
+  Check,
   Clock,
   Coins,
   Cpu,
@@ -26,6 +27,7 @@ import {
 } from "lucide-react";
 import type {
   InstanceObservabilitySummary,
+  CompanyComputeUsage,
   ModelComputeUsage,
   ComputeTimelinePoint,
   CostlyTask,
@@ -39,10 +41,17 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AgentStatusBadge } from "@/components/StatusBadge";
 import { AgentTraceViewer } from "@/components/AgentTraceViewer";
-import { formatBytes, formatCents, formatDurationMs, formatRuntimeMs, formatTokens } from "@/lib/utils";
+import { cn, formatBytes, formatCents, formatDurationMs, formatRuntimeMs, formatTokens } from "@/lib/utils";
 
 const WINDOW_PRESETS = [
   { key: "24h", label: "Last 24h" },
@@ -66,7 +75,12 @@ const MODEL_PALETTE = [
   "bg-orange-500",
 ];
 
-function exportObservabilityCsv(data: InstanceObservabilitySummary, windowKey: string) {
+function exportObservabilityCsv(
+  data: InstanceObservabilitySummary,
+  windowKey: string,
+  selectedCompanyId?: string,
+  selectedCompany?: CompanyComputeUsage | null,
+) {
   const rows: string[] = [];
 
   const escape = (val: unknown) => {
@@ -77,9 +91,15 @@ function exportObservabilityCsv(data: InstanceObservabilitySummary, windowKey: s
     return s;
   };
 
+  const scopeLabel =
+    selectedCompany && selectedCompanyId !== "all"
+      ? `${selectedCompany.companyName} (${selectedCompany.companyPrefix})`
+      : "Total Geral (All Organizations)";
+
   // Section 1: Summary Overview
   rows.push("=== PAPERCLIP INSTANCE COMPUTE & OBSERVABILITY REPORT ===");
   rows.push(`Report Generated,${new Date().toISOString()}`);
+  rows.push(`Scope,${escape(scopeLabel)}`);
   rows.push(`Time Window,${windowKey}`);
   rows.push(`Total Organizations,${data.totalCompanies}`);
   rows.push(`Total Agents,${data.totalAgents}`);
@@ -328,9 +348,13 @@ function exportObservabilityCsv(data: InstanceObservabilitySummary, windowKey: s
   const csvContent = "\uFEFF" + rows.join("\r\n");
   const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
+  const scopeSlug =
+    selectedCompany && selectedCompanyId !== "all"
+      ? selectedCompany.companyPrefix.toLowerCase()
+      : "all";
   const link = document.createElement("a");
   link.setAttribute("href", url);
-  link.setAttribute("download", `paperclip-observability-${windowKey}-${new Date().toISOString().slice(0, 10)}.csv`);
+  link.setAttribute("download", `paperclip-observability-${scopeSlug}-${windowKey}-${new Date().toISOString().slice(0, 10)}.csv`);
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
@@ -822,6 +846,7 @@ function MetricTile({
 export function InstanceObservability() {
   const { setBreadcrumbs } = useBreadcrumbs();
   const [window, setWindow] = useState<WindowKey>("30d");
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>("all");
   const [activeTab, setActiveTab] = useState<"organizations" | "agents" | "tasks">("organizations");
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -843,10 +868,15 @@ export function InstanceObservability() {
   }, [setBreadcrumbs]);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["instance-observability", window],
-    queryFn: () => instanceSettingsApi.getObservability(window),
+    queryKey: ["instance-observability", window, selectedCompanyId],
+    queryFn: () => instanceSettingsApi.getObservability(window, selectedCompanyId),
     refetchInterval: 30_000,
   });
+
+  const selectedCompany = useMemo(() => {
+    if (!data?.companies || selectedCompanyId === "all") return null;
+    return data.companies.find((c) => c.companyId === selectedCompanyId) ?? null;
+  }, [data?.companies, selectedCompanyId]);
 
   const filteredAndSortedCompanies = useMemo(() => {
     if (!data?.companies) return [];
@@ -1069,10 +1099,43 @@ export function InstanceObservability() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <div className="w-48 sm:w-56">
+            <Select value={selectedCompanyId} onValueChange={(val) => setSelectedCompanyId(val)}>
+              <SelectTrigger size="sm" className="h-8 text-xs font-medium">
+                <div className="flex items-center gap-1.5 truncate">
+                  <Building2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="truncate">
+                    {selectedCompanyId === "all"
+                      ? "Total Geral"
+                      : selectedCompany
+                      ? `${selectedCompany.companyName}`
+                      : selectedCompanyId}
+                  </span>
+                </div>
+              </SelectTrigger>
+              <SelectContent align="end" className="max-h-72">
+                <SelectItem value="all">
+                  <div className="flex items-center gap-2">
+                    <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span>Total Geral (Todas)</span>
+                  </div>
+                </SelectItem>
+                {data?.companies?.map((c) => (
+                  <SelectItem key={c.companyId} value={c.companyId}>
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{c.companyName}</span>
+                      <span className="text-xs text-muted-foreground font-mono">({c.companyPrefix})</span>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
           <Button
             variant="outline"
             size="sm"
-            onClick={() => data && exportObservabilityCsv(data, window)}
+            onClick={() => data && exportObservabilityCsv(data, window, selectedCompanyId, selectedCompany)}
             disabled={!data}
             className="gap-1.5"
           >
@@ -1092,6 +1155,30 @@ export function InstanceObservability() {
           ))}
         </div>
       </div>
+
+      {selectedCompany && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/20 bg-primary/5 px-4 py-2.5 text-sm">
+          <div className="flex items-center gap-2">
+            <Building2 className="h-4 w-4 text-primary shrink-0" />
+            <span className="text-muted-foreground">Métricas filtradas por empresa:</span>
+            <span className="font-semibold text-foreground">{selectedCompany.companyName}</span>
+            <Badge variant="outline" className="font-mono text-xs">
+              {selectedCompany.companyPrefix}
+            </Badge>
+            <span className="text-xs text-muted-foreground hidden sm:inline">
+              ({selectedCompany.activeAgentCount} agentes ativos · {selectedCompany.issueCount} tarefas · {selectedCompany.runCount} execuções)
+            </span>
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setSelectedCompanyId("all")}
+            className="h-7 px-2.5 text-xs font-medium"
+          >
+            Ver Total Geral
+          </Button>
+        </div>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <MetricTile
@@ -1426,7 +1513,13 @@ export function InstanceObservability() {
                       </tr>
                     ) : (
                       filteredAndSortedCompanies.map((comp) => (
-                        <tr key={comp.companyId} className="border-b border-border last:border-b-0 hover:bg-muted/20">
+                        <tr
+                          key={comp.companyId}
+                          className={cn(
+                            "border-b border-border last:border-b-0 hover:bg-muted/20",
+                            selectedCompanyId === comp.companyId && "bg-primary/5 hover:bg-primary/10",
+                          )}
+                        >
                           <td className="px-5 py-3.5 align-top">
                             <div className="flex items-center gap-2">
                               <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -1434,6 +1527,11 @@ export function InstanceObservability() {
                               <Badge variant="outline" className="font-mono text-xs">
                                 {comp.companyPrefix}
                               </Badge>
+                              {selectedCompanyId === comp.companyId && (
+                                <Badge variant="secondary" className="bg-primary/10 text-primary text-xs px-1.5 py-0 font-normal">
+                                  Filtrada
+                                </Badge>
+                              )}
                             </div>
                             <div className="mt-0.5 text-xs text-muted-foreground">
                               {comp.issueCount} tasks · status: {comp.companyStatus}
@@ -1482,12 +1580,37 @@ export function InstanceObservability() {
                           </td>
 
                           <td className="px-5 py-3.5 text-right align-top">
-                            <Button variant="ghost" size="sm" asChild>
-                              <Link to={`/${comp.companyPrefix}/dashboard`} className="flex items-center gap-1">
-                                <span>Open</span>
-                                <ExternalLink className="h-3 w-3" />
-                              </Link>
-                            </Button>
+                            <div className="flex items-center justify-end gap-1.5">
+                              {selectedCompanyId === comp.companyId ? (
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={() => setSelectedCompanyId("all")}
+                                  className="h-8 px-2.5 text-xs gap-1"
+                                  title="Limpar filtro e ver total geral"
+                                >
+                                  <Check className="h-3.5 w-3.5 text-primary" />
+                                  <span>Filtrada</span>
+                                </Button>
+                              ) : (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => setSelectedCompanyId(comp.companyId)}
+                                  className="h-8 px-2.5 text-xs gap-1"
+                                  title={`Filtrar métricas para ${comp.companyName}`}
+                                >
+                                  <Activity className="h-3.5 w-3.5 text-muted-foreground" />
+                                  <span>Filtrar</span>
+                                </Button>
+                              )}
+                              <Button variant="ghost" size="sm" className="h-8 px-2" asChild>
+                                <Link to={`/${comp.companyPrefix}/dashboard`} className="flex items-center gap-1">
+                                  <span>Open</span>
+                                  <ExternalLink className="h-3 w-3" />
+                                </Link>
+                              </Button>
+                            </div>
                           </td>
                         </tr>
                       ))
