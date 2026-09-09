@@ -1462,8 +1462,84 @@ describe("instance settings routes", () => {
       expect(res.body.costlyTasks[0].issueId).toBe("issue-1");
       expect(res.body.tasks).toHaveLength(1);
       expect(res.body.tasks[0].issueId).toBe("issue-1");
+      expect(res.body.selectedCompanyId).toBe("all");
       expect(res.body.cacheHitRate).toBeDefined();
       expect(res.body.simulatedCacheSavingsCents).toBeDefined();
+    });
+
+    it("supports scoping observability metrics by companyId", async () => {
+      const now = new Date();
+      const mockCompanies = [
+        { id: "comp-1", name: "Company 1", issuePrefix: "CP1", status: "active", createdAt: now },
+        { id: "comp-2", name: "Company 2", issuePrefix: "CP2", status: "active", createdAt: now },
+      ];
+      const mockAgentRows = [
+        { companyId: "comp-1", agentCount: 2, activeAgentCount: 1 },
+        { companyId: "comp-2", agentCount: 3, activeAgentCount: 2 },
+      ];
+      const mockRunRows = [
+        { companyId: "comp-1", runCount: 10, activeRunCount: 1, runtimeMs: 30000 },
+        { companyId: "comp-2", runCount: 20, activeRunCount: 2, runtimeMs: 60000 },
+      ];
+      const mockCostRows = [
+        {
+          companyId: "comp-1",
+          model: "claude-3-5-sonnet",
+          provider: "anthropic",
+          billingType: "subscription_included",
+          costCents: 0,
+          inputTokens: 10000,
+          cachedInputTokens: 0,
+          outputTokens: 2000,
+          subscriptionRunCount: 5,
+        },
+        {
+          companyId: "comp-2",
+          model: "gpt-4o",
+          provider: "openai",
+          billingType: "metered_api",
+          costCents: 150,
+          inputTokens: 25000,
+          cachedInputTokens: 5000,
+          outputTokens: 5000,
+          subscriptionRunCount: 0,
+        },
+      ];
+
+      let selectCallIndex = 0;
+      mockDb.select.mockImplementation(() => {
+        const calls = [
+          mockCompanies,
+          mockAgentRows,
+          [],
+          mockRunRows,
+          mockCostRows,
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+        ];
+        const data = calls[selectCallIndex++] ?? [];
+        return createMockSelectChain(data);
+      });
+
+      const app = await createApp(adminActor);
+      const res = await request(app).get("/api/instance/observability?companyId=comp-1");
+      expect(res.status).toBe(200);
+      expect(res.body.selectedCompanyId).toBe("comp-1");
+      expect(res.body.totalCompanies).toBe(2);
+      expect(res.body.totalAgents).toBe(2);
+      expect(res.body.totalRuns).toBe(10);
+      expect(res.body.activeRuns).toBe(1);
+      expect(res.body.totalRuntimeMs).toBe(30000);
+      expect(res.body.totalTokens).toBe(12000);
+      // Models should only contain comp-1's model (claude-3-5-sonnet)
+      expect(res.body.models).toHaveLength(1);
+      expect(res.body.models[0].model).toBe("claude-3-5-sonnet");
+      // But companies array retains all companies for dropdown selection
+      expect(res.body.companies).toHaveLength(2);
     });
 
     it("allows company owner board actors and returns aggregated observability summary", async () => {
@@ -1489,6 +1565,7 @@ describe("instance settings routes", () => {
       const res = await request(app).get("/api/instance/observability");
       expect(res.status).toBe(200);
       expect(res.body.totalCompanies).toBe(1);
+      expect(res.body.selectedCompanyId).toBe("all");
     });
   });
 
