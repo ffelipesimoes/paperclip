@@ -192,6 +192,9 @@ export interface ComputeTimelinePoint {
   runCount: number;
   runtimeMs: number;
   tokens: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
   costCents: number;
   simulatedCostCents: number;
 }

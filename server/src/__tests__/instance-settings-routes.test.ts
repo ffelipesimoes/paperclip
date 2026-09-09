@@ -1453,6 +1453,9 @@ describe("instance settings routes", () => {
       expect(res.body.models[0].model).toBe("claude-3-5-sonnet");
       expect(res.body.timeline).toHaveLength(1);
       expect(res.body.timeline[0].bucket).toBe("2026-09-09");
+      expect(res.body.timeline[0].inputTokens).toBe(10000);
+      expect(res.body.timeline[0].cachedInputTokens).toBe(0);
+      expect(res.body.timeline[0].outputTokens).toBe(2000);
       expect(res.body.costlyTasks).toHaveLength(1);
       expect(res.body.costlyTasks[0].issueId).toBe("issue-1");
       expect(res.body.cacheHitRate).toBeDefined();

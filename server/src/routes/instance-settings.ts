@@ -815,6 +815,9 @@ export function instanceSettingsRoutes(db: Db) {
           runCount: 0,
           runtimeMs: 0,
           tokens: 0,
+          inputTokens: 0,
+          cachedInputTokens: 0,
+          outputTokens: 0,
           costCents: 0,
           simulatedCostCents: 0,
         };
@@ -824,6 +827,9 @@ export function instanceSettingsRoutes(db: Db) {
       const cacheTok = Number(row.cachedInputTokens ?? 0);
       const outTok = Number(row.outputTokens ?? 0);
       point.tokens += inTok + cacheTok + outTok;
+      point.inputTokens += inTok;
+      point.cachedInputTokens += cacheTok;
+      point.outputTokens += outTok;
       point.costCents += Number(row.costCents ?? 0);
       point.simulatedCostCents += simulateCostCents({
         model: row.model,
@@ -844,6 +850,9 @@ export function instanceSettingsRoutes(db: Db) {
           runCount: 0,
           runtimeMs: 0,
           tokens: 0,
+          inputTokens: 0,
+          cachedInputTokens: 0,
+          outputTokens: 0,
           costCents: 0,
           simulatedCostCents: 0,
         };
