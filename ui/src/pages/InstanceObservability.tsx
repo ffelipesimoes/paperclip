@@ -6,6 +6,7 @@ import {
   BarChart2,
   Bot,
   Building2,
+  Calendar,
   Clock,
   Coins,
   Cpu,
@@ -420,97 +421,287 @@ function ComputeTimelineCard({
   timeline?: ComputeTimelinePoint[];
   window: string;
 }) {
-  const [metric, setMetric] = useState<"tokens" | "cost" | "runtime">("tokens");
-
+  const [metric, setMetric] = useState<"cost" | "tokens" | "runtime">("cost");
   const points = timeline ?? [];
-  const maxVal = useMemo(() => {
-    if (points.length === 0) return 1;
-    let max = 0;
-    for (const p of points) {
-      const v = metric === "tokens" ? p.tokens : metric === "cost" ? p.simulatedCostCents : p.runtimeMs;
-      if (v > max) max = v;
+  const [selectedBucket, setSelectedBucket] = useState<string | null>(null);
+
+  const analytics = useMemo(() => {
+    if (points.length === 0) {
+      return { total: 0, avg: 0, peak: null, peakVal: 0 };
     }
-    return max > 0 ? max : 1;
+    let total = 0;
+    let peakVal = -1;
+    let peakPoint: ComputeTimelinePoint | null = null;
+
+    for (const p of points) {
+      const v = metric === "cost" ? p.simulatedCostCents : metric === "tokens" ? p.tokens : p.runtimeMs;
+      total += v;
+      if (v > peakVal) {
+        peakVal = v;
+        peakPoint = p;
+      }
+    }
+    const avg = Math.round(total / points.length);
+    return { total, avg, peak: peakPoint, peakVal: Math.max(0, peakVal) };
   }, [points, metric]);
 
+  const maxVal = analytics.peakVal > 0 ? analytics.peakVal : 1;
+
+  const activePoint = useMemo(() => {
+    if (selectedBucket) {
+      const found = points.find((p) => p.bucket === selectedBucket);
+      if (found) return found;
+    }
+    return analytics.peak ?? points[points.length - 1] ?? null;
+  }, [points, selectedBucket, analytics.peak]);
+
+  const formatMetricValue = (val: number) => {
+    if (metric === "cost") return formatCents(val);
+    if (metric === "tokens") return formatTokens(val);
+    return formatRuntimeMs(val);
+  };
+
   return (
-    <Card>
+    <Card className="overflow-hidden">
       <CardHeader className="px-5 pt-5 pb-3">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-0.5">
             <div className="flex items-center gap-2">
               <BarChart2 className="h-4 w-4 text-muted-foreground" />
-              <CardTitle className="text-base">Compute Timeline</CardTitle>
+              <CardTitle className="text-base">Linha do Tempo de Computação (Compute Timeline)</CardTitle>
             </div>
             <CardDescription>
-              {window === "24h" ? "Hourly" : "Daily"} execution trend and model throughput.
+              Evolução {window === "24h" ? "horária" : "diária"} de investimento, volume de tokens e tempo de máquina.
             </CardDescription>
           </div>
           <div className="flex items-center gap-1 bg-muted/40 p-0.5 rounded-lg border border-border text-xs">
             <button
               type="button"
-              onClick={() => setMetric("tokens")}
-              className={`px-2 py-1 rounded font-medium transition-colors ${
-                metric === "tokens" ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Tokens
-            </button>
-            <button
-              type="button"
               onClick={() => setMetric("cost")}
-              className={`px-2 py-1 rounded font-medium transition-colors ${
+              className={`px-2.5 py-1 rounded font-medium transition-colors ${
                 metric === "cost" ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              Cost
+              Custo Estimado
+            </button>
+            <button
+              type="button"
+              onClick={() => setMetric("tokens")}
+              className={`px-2.5 py-1 rounded font-medium transition-colors ${
+                metric === "tokens" ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Tokens (Cache / In / Out)
             </button>
             <button
               type="button"
               onClick={() => setMetric("runtime")}
-              className={`px-2 py-1 rounded font-medium transition-colors ${
+              className={`px-2.5 py-1 rounded font-medium transition-colors ${
                 metric === "runtime" ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              Runtime
+              Tempo de Execução
             </button>
           </div>
         </div>
+
+        {points.length > 0 && (
+          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 rounded-lg border border-border bg-muted/20 p-3 text-xs">
+            <div>
+              <span className="text-muted-foreground">Total no período:</span>
+              <div className="mt-0.5 font-mono text-sm font-semibold text-foreground">
+                {formatMetricValue(analytics.total)}
+              </div>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Média diária:</span>
+              <div className="mt-0.5 font-mono text-sm font-semibold text-foreground">
+                {formatMetricValue(analytics.avg)}/dia
+              </div>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Pico de consumo:</span>
+              <div className="mt-0.5 font-mono text-sm font-semibold text-amber-500">
+                {analytics.peak ? `${analytics.peak.label} (${formatMetricValue(analytics.peakVal)})` : "—"}
+              </div>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Períodos com atividade:</span>
+              <div className="mt-0.5 font-mono text-sm font-semibold text-foreground">
+                {points.length} {window === "24h" ? "horas" : "dias"}
+              </div>
+            </div>
+          </div>
+        )}
       </CardHeader>
-      <CardContent className="px-5 pb-5 pt-2">
+
+      <CardContent className="px-5 pb-5 pt-2 space-y-4">
         {points.length === 0 ? (
-          <div className="h-36 flex items-center justify-center text-xs text-muted-foreground">
-            No timeline data recorded for this window.
+          <div className="h-44 flex items-center justify-center text-xs text-muted-foreground">
+            Nenhuma atividade de computação registrada neste período.
           </div>
         ) : (
-          <div className="flex items-end gap-1 sm:gap-2 h-36 w-full pt-4 pb-1 overflow-x-auto">
-            {points.map((pt) => {
-              const val = metric === "tokens" ? pt.tokens : metric === "cost" ? pt.simulatedCostCents : pt.runtimeMs;
-              const heightPct = Math.max(4, Math.round((val / maxVal) * 100));
-              return (
-                <div key={pt.bucket} className="group relative flex-1 min-w-4 flex flex-col items-center justify-end h-full">
-                  <div className="absolute bottom-full mb-2 hidden group-hover:flex flex-col items-center z-20 pointer-events-none">
-                    <div className="rounded border border-border bg-popover text-popover-foreground px-2 py-1 text-xs shadow-md whitespace-nowrap">
-                      <div className="font-semibold">{pt.bucket}</div>
-                      <div className="text-muted-foreground">
-                        {formatTokens(pt.tokens)} tokens · {formatCents(pt.simulatedCostCents)}
-                      </div>
-                      <div className="text-muted-foreground">
-                        {pt.runCount} runs · {formatRuntimeMs(pt.runtimeMs)}
-                      </div>
-                    </div>
-                  </div>
-                  <div
-                    className="w-full rounded-t bg-primary/70 hover:bg-primary transition-all cursor-pointer"
-                    style={{ height: `${heightPct}%` }}
-                  />
-                  <span className="mt-1 text-(length:--text-micro) text-muted-foreground truncate max-w-full font-mono">
-                    {pt.label}
+          <>
+            <div className="relative pt-6 pb-2">
+              <div className="absolute inset-x-0 top-6 bottom-8 flex flex-col justify-between pointer-events-none opacity-40">
+                <div className="border-b border-dashed border-border w-full flex justify-end">
+                  <span className="text-(length:--text-micro) font-mono text-muted-foreground pr-1 -mt-2">
+                    {formatMetricValue(analytics.peakVal)}
                   </span>
                 </div>
-              );
-            })}
-          </div>
+                <div className="border-b border-dashed border-border w-full flex justify-end">
+                  <span className="text-(length:--text-micro) font-mono text-muted-foreground pr-1 -mt-2">
+                    {formatMetricValue(Math.round(analytics.peakVal / 2))}
+                  </span>
+                </div>
+                <div className="border-b border-border w-full" />
+              </div>
+
+              <div className="flex items-end justify-around gap-2 sm:gap-4 h-48 w-full px-2">
+                {points.map((pt) => {
+                  const val = metric === "cost" ? pt.simulatedCostCents : metric === "tokens" ? pt.tokens : pt.runtimeMs;
+                  const heightPct = Math.max(6, Math.round((val / maxVal) * 100));
+                  const isSelected = activePoint?.bucket === pt.bucket;
+                  const isPeak = analytics.peak?.bucket === pt.bucket;
+
+                  const totalTok = Math.max(1, pt.tokens);
+                  const cachedPct = Math.round(((pt.cachedInputTokens ?? 0) / totalTok) * 100);
+                  const inPct = Math.round(((pt.inputTokens ?? 0) / totalTok) * 100);
+                  const outPct = Math.max(0, 100 - cachedPct - inPct);
+
+                  return (
+                    <div
+                      key={pt.bucket}
+                      onClick={() => setSelectedBucket(pt.bucket)}
+                      className="group relative flex-1 max-w-24 flex flex-col items-center justify-end h-full cursor-pointer"
+                    >
+                      <div className="mb-1.5 flex flex-col items-center">
+                        {isPeak && (
+                          <span className="text-(length:--text-micro) font-semibold uppercase tracking-wider text-amber-500">
+                            Pico
+                          </span>
+                        )}
+                        <span
+                          className={`font-mono text-xs font-semibold whitespace-nowrap transition-colors ${
+                            isSelected ? "text-foreground scale-105" : "text-muted-foreground group-hover:text-foreground"
+                          }`}
+                        >
+                          {formatMetricValue(val)}
+                        </span>
+                      </div>
+
+                      <div
+                        className={`w-full rounded-t-md transition-all relative overflow-hidden ${
+                          isSelected ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""
+                        }`}
+                        style={{ height: `${heightPct}%` }}
+                      >
+                        {metric === "tokens" ? (
+                          <div className="w-full h-full flex flex-col justify-end">
+                            {outPct > 0 && <div style={{ height: `${outPct}%` }} className="bg-purple-500 w-full" title={`Output: ${formatTokens(pt.outputTokens ?? 0)}`} />}
+                            {inPct > 0 && <div style={{ height: `${inPct}%` }} className="bg-sky-500 w-full" title={`Input: ${formatTokens(pt.inputTokens ?? 0)}`} />}
+                            {cachedPct > 0 && <div style={{ height: `${cachedPct}%` }} className="bg-emerald-500 w-full" title={`Cached: ${formatTokens(pt.cachedInputTokens ?? 0)}`} />}
+                          </div>
+                        ) : metric === "cost" ? (
+                          <div className={`w-full h-full transition-colors ${
+                            isPeak ? "bg-amber-500 group-hover:bg-amber-600" : "bg-primary/80 group-hover:bg-primary"
+                          }`} />
+                        ) : (
+                          <div className="w-full h-full bg-blue-500 group-hover:bg-blue-600 transition-colors" />
+                        )}
+                      </div>
+
+                      <span className={`mt-2 text-xs font-mono transition-colors ${
+                        isSelected ? "font-bold text-foreground" : "text-muted-foreground group-hover:text-foreground"
+                      }`}>
+                        {pt.label}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {metric === "tokens" && (
+              <div className="flex flex-wrap items-center justify-center gap-4 text-xs pt-1 text-muted-foreground">
+                <div className="flex items-center gap-1.5">
+                  <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                  <span>Prompt Cache</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="h-2.5 w-2.5 rounded-full bg-sky-500" />
+                  <span>Entrada Padrão (Fresh Input)</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="h-2.5 w-2.5 rounded-full bg-purple-500" />
+                  <span>Saída (Completion)</span>
+                </div>
+              </div>
+            )}
+
+            {activePoint && (
+              <div className="rounded-lg border border-border bg-card p-3.5 space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="h-4 w-4 text-muted-foreground" />
+                    <span className="font-semibold text-sm text-foreground">
+                      Detalhamento de <span className="font-mono">{activePoint.bucket}</span>
+                    </span>
+                    {analytics.peak?.bucket === activePoint.bucket && (
+                      <Badge variant="secondary" className="bg-amber-500/10 text-amber-500 text-xs py-0">
+                        Pico do Período
+                      </Badge>
+                    )}
+                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    Clique em qualquer barra para alternar o dia
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1 text-xs">
+                  <div className="rounded border border-border/50 bg-muted/20 p-2 space-y-0.5">
+                    <span className="text-muted-foreground">Custo Simulado</span>
+                    <div className="font-mono text-sm font-semibold text-amber-500">
+                      {formatCents(activePoint.simulatedCostCents)}
+                    </div>
+                    <span className="text-(length:--text-micro) text-muted-foreground block">
+                      Billed direto: {formatCents(activePoint.costCents)}
+                    </span>
+                  </div>
+
+                  <div className="rounded border border-border/50 bg-muted/20 p-2 space-y-0.5">
+                    <span className="text-muted-foreground">Volume de Tokens</span>
+                    <div className="font-mono text-sm font-semibold text-foreground">
+                      {formatTokens(activePoint.tokens)}
+                    </div>
+                    <span className="text-(length:--text-micro) text-muted-foreground block">
+                      {formatTokens(activePoint.cachedInputTokens ?? 0)} cached ({Math.round(((activePoint.cachedInputTokens ?? 0) / Math.max(1, activePoint.tokens)) * 100)}%)
+                    </span>
+                  </div>
+
+                  <div className="rounded border border-border/50 bg-muted/20 p-2 space-y-0.5">
+                    <span className="text-muted-foreground">Execuções de Agentes</span>
+                    <div className="font-mono text-sm font-semibold text-foreground">
+                      {activePoint.runCount} runs
+                    </div>
+                    <span className="text-(length:--text-micro) text-muted-foreground block">
+                      Tempo: {formatRuntimeMs(activePoint.runtimeMs)}
+                    </span>
+                  </div>
+
+                  <div className="rounded border border-border/50 bg-muted/20 p-2 space-y-0.5">
+                    <span className="text-muted-foreground">Média por Execução</span>
+                    <div className="font-mono text-sm font-semibold text-foreground">
+                      {activePoint.runCount > 0 ? formatTokens(Math.round(activePoint.tokens / activePoint.runCount)) : "0"} tok
+                    </div>
+                    <span className="text-(length:--text-micro) text-muted-foreground block">
+                      {activePoint.runCount > 0 ? formatCents(Math.round(activePoint.simulatedCostCents / activePoint.runCount)) : "$0"}/run
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </CardContent>
     </Card>
