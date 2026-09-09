@@ -3,20 +3,31 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
   ArrowUpDown,
+  BarChart2,
   Bot,
   Building2,
   Clock,
   Coins,
   Cpu,
   DollarSign,
+  Download,
   ExternalLink,
+  Flame,
   HardDrive,
   Info,
+  PieChart,
   Search,
   Server,
   ShieldAlert,
+  Sparkles,
   Zap,
 } from "lucide-react";
+import type {
+  InstanceObservabilitySummary,
+  ModelComputeUsage,
+  ComputeTimelinePoint,
+  CostlyTask,
+} from "@paperclipai/shared";
 import { Link } from "@/lib/router";
 import { instanceSettingsApi } from "@/api/instanceSettings";
 import { ApiError } from "@/api/client";
@@ -39,6 +50,472 @@ const WINDOW_PRESETS = [
 type WindowKey = (typeof WINDOW_PRESETS)[number]["key"];
 type SortField = "runtime" | "tokens" | "simulatedCost" | "cost" | "name" | "activeRuns";
 type AgentSortField = "runtime" | "tokens" | "simulatedCost" | "name" | "runs" | "activeRuns" | "throughput";
+
+const MODEL_PALETTE = [
+  "bg-sky-500",
+  "bg-emerald-500",
+  "bg-amber-500",
+  "bg-purple-500",
+  "bg-rose-500",
+  "bg-indigo-500",
+  "bg-cyan-500",
+  "bg-orange-500",
+];
+
+function exportObservabilityCsv(data: InstanceObservabilitySummary, windowKey: string) {
+  const rows: string[] = [];
+
+  const escape = (val: unknown) => {
+    const s = String(val ?? "");
+    if (s.includes(",") || s.includes('"') || s.includes("\n") || s.includes("\r")) {
+      return `"${s.replace(/"/g, '""')}"`;
+    }
+    return s;
+  };
+
+  // Section 1: Summary Overview
+  rows.push("=== PAPERCLIP INSTANCE COMPUTE & OBSERVABILITY REPORT ===");
+  rows.push(`Report Generated,${new Date().toISOString()}`);
+  rows.push(`Time Window,${windowKey}`);
+  rows.push(`Total Organizations,${data.totalCompanies}`);
+  rows.push(`Total Agents,${data.totalAgents}`);
+  rows.push(`Total Runs,${data.totalRuns}`);
+  rows.push(`Active Runs,${data.activeRuns}`);
+  rows.push(`Total Runtime (ms),${data.totalRuntimeMs}`);
+  rows.push(`Total Runtime (formatted),${escape(formatRuntimeMs(data.totalRuntimeMs))}`);
+  rows.push(`Total Tokens,${data.totalTokens}`);
+  rows.push(`Input Tokens,${data.inputTokens}`);
+  rows.push(`Cached Input Tokens,${data.cachedInputTokens}`);
+  rows.push(`Output Tokens,${data.outputTokens}`);
+  rows.push(`Cache Hit Rate (%),${data.cacheHitRate ?? 0}%`);
+  rows.push(`Estimated Cache Savings ($),${((data.simulatedCacheSavingsCents ?? 0) / 100).toFixed(2)}`);
+  rows.push(`Simulated Model Cost ($),${((data.simulatedCostCents ?? 0) / 100).toFixed(2)}`);
+  rows.push(`Actual Billed Spend ($),${((data.billedCostCents ?? 0) / 100).toFixed(2)}`);
+  rows.push("");
+
+  // Section 2: Organizations
+  rows.push("=== ORGANIZATIONS ===");
+  rows.push(
+    [
+      "Company ID",
+      "Company Name",
+      "Prefix",
+      "Status",
+      "Agents",
+      "Active Agents",
+      "Tasks",
+      "Runs",
+      "Active Runs",
+      "Runtime (ms)",
+      "Total Tokens",
+      "Input Tokens",
+      "Cached Input Tokens",
+      "Output Tokens",
+      "Billed Cost ($)",
+      "Simulated Cost ($)",
+    ]
+      .map(escape)
+      .join(","),
+  );
+
+  for (const c of data.companies) {
+    rows.push(
+      [
+        c.companyId,
+        c.companyName,
+        c.companyPrefix,
+        c.companyStatus,
+        c.agentCount,
+        c.activeAgentCount,
+        c.issueCount,
+        c.runCount,
+        c.activeRunCount,
+        c.runtimeMs,
+        c.totalTokens,
+        c.inputTokens,
+        c.cachedInputTokens,
+        c.outputTokens,
+        (c.costCents / 100).toFixed(2),
+        (c.simulatedCostCents / 100).toFixed(2),
+      ]
+        .map(escape)
+        .join(","),
+    );
+  }
+  rows.push("");
+
+  // Section 3: Agents Breakdown
+  rows.push("=== AGENTS ===");
+  rows.push(
+    [
+      "Agent ID",
+      "Agent Name",
+      "Role",
+      "Status",
+      "Company Name",
+      "Company Prefix",
+      "Runs",
+      "Active Runs",
+      "Runtime (ms)",
+      "Avg Duration (ms)",
+      "Total Tokens",
+      "Input Tokens",
+      "Cached Input Tokens",
+      "Output Tokens",
+      "Tokens/sec",
+      "Billed Cost ($)",
+      "Simulated Cost ($)",
+    ]
+      .map(escape)
+      .join(","),
+  );
+
+  for (const a of data.agents) {
+    rows.push(
+      [
+        a.agentId,
+        a.agentName,
+        a.agentRole,
+        a.agentStatus,
+        a.companyName,
+        a.companyPrefix,
+        a.runCount,
+        a.activeRunCount,
+        a.runtimeMs,
+        a.avgDurationMs,
+        a.totalTokens,
+        a.inputTokens,
+        a.cachedInputTokens,
+        a.outputTokens,
+        a.tokensPerSecond,
+        (a.costCents / 100).toFixed(2),
+        (a.simulatedCostCents / 100).toFixed(2),
+      ]
+        .map(escape)
+        .join(","),
+    );
+  }
+  rows.push("");
+
+  // Section 4: Models Mix
+  if (data.models && data.models.length > 0) {
+    rows.push("=== MODEL MIX ===");
+    rows.push(
+      [
+        "Provider",
+        "Model",
+        "Input Tokens",
+        "Cached Input Tokens",
+        "Output Tokens",
+        "Total Tokens",
+        "Percentage (%)",
+        "Billed Cost ($)",
+        "Simulated Cost ($)",
+      ]
+        .map(escape)
+        .join(","),
+    );
+
+    for (const m of data.models) {
+      rows.push(
+        [
+          m.provider,
+          m.model,
+          m.inputTokens,
+          m.cachedInputTokens,
+          m.outputTokens,
+          m.totalTokens,
+          m.percentage,
+          (m.costCents / 100).toFixed(2),
+          (m.simulatedCostCents / 100).toFixed(2),
+        ]
+          .map(escape)
+          .join(","),
+      );
+    }
+    rows.push("");
+  }
+
+  // Section 5: Top Tasks
+  if (data.costlyTasks && data.costlyTasks.length > 0) {
+    rows.push("=== TOP COSTLIEST TASKS ===");
+    rows.push(
+      [
+        "Issue ID",
+        "Issue Title",
+        "Company Name",
+        "Agent Name",
+        "Total Tokens",
+        "Simulated Cost ($)",
+      ]
+        .map(escape)
+        .join(","),
+    );
+
+    for (const t of data.costlyTasks) {
+      rows.push(
+        [
+          t.issueId,
+          t.issueTitle,
+          t.companyName ?? "",
+          t.agentName ?? "",
+          t.totalTokens,
+          (t.simulatedCostCents / 100).toFixed(2),
+        ]
+          .map(escape)
+          .join(","),
+      );
+    }
+  }
+
+  const csvContent = "\uFEFF" + rows.join("\r\n");
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.setAttribute("href", url);
+  link.setAttribute("download", `paperclip-observability-${windowKey}-${new Date().toISOString().slice(0, 10)}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function ModelMixCard({ models }: { models?: ModelComputeUsage[] }) {
+  const modelList = models ?? [];
+
+  return (
+    <Card>
+      <CardHeader className="px-5 pt-5 pb-3">
+        <div className="flex items-center gap-2">
+          <PieChart className="h-4 w-4 text-muted-foreground" />
+          <CardTitle className="text-base">Model Mix & LLM Distribution</CardTitle>
+        </div>
+        <CardDescription>
+          Share of tokens and simulated expenditure across providers and LLM architectures.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="px-5 pb-5 pt-2 space-y-4">
+        {modelList.length === 0 ? (
+          <div className="h-32 flex items-center justify-center text-xs text-muted-foreground">
+            No model usage recorded for this window.
+          </div>
+        ) : (
+          <>
+            <div className="h-3 w-full rounded-full overflow-hidden flex bg-muted/40">
+              {modelList.map((m, idx) => (
+                <div
+                  key={`${m.provider}:${m.model}`}
+                  className={`${MODEL_PALETTE[idx % MODEL_PALETTE.length]} transition-all`}
+                  style={{ width: `${Math.max(1, m.percentage)}%` }}
+                  title={`${m.model}: ${m.percentage}% (${formatTokens(m.totalTokens)} tokens)`}
+                />
+              ))}
+            </div>
+
+            <div className="space-y-2 pt-1 max-h-56 overflow-y-auto pr-1">
+              {modelList.map((m, idx) => (
+                <div
+                  key={`${m.provider}:${m.model}`}
+                  className="flex items-center justify-between text-xs py-1 border-b border-border/50 last:border-0"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${MODEL_PALETTE[idx % MODEL_PALETTE.length]}`} />
+                    <span className="font-medium text-foreground truncate">{m.model}</span>
+                    <Badge variant="outline" className="text-(length:--text-micro) font-mono px-1 py-0">
+                      {m.provider}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0 text-right">
+                    <span className="text-muted-foreground font-mono">
+                      {formatTokens(m.totalTokens)} ({m.percentage}%)
+                    </span>
+                    <span className="font-mono font-medium text-amber-500 min-w-16">
+                      {formatCents(m.simulatedCostCents)}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function CostlyTasksCard({ tasks }: { tasks?: CostlyTask[] }) {
+  const taskList = tasks ?? [];
+
+  return (
+    <Card>
+      <CardHeader className="px-5 pt-5 pb-3">
+        <div className="flex items-center gap-2">
+          <Flame className="h-4 w-4 text-amber-500" />
+          <CardTitle className="text-base">Top Costliest Tasks</CardTitle>
+        </div>
+        <CardDescription>
+          Work items and tasks accounting for the highest token and compute consumption.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="px-5 pb-5 pt-2">
+        {taskList.length === 0 ? (
+          <div className="h-32 flex items-center justify-center text-xs text-muted-foreground">
+            No task-level compute attribution recorded.
+          </div>
+        ) : (
+          <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+            {taskList.map((t, idx) => (
+              <div
+                key={t.issueId}
+                className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-muted/20 p-2.5 text-xs hover:bg-muted/40 transition-colors"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted font-mono font-medium text-(length:--text-micro) text-muted-foreground">
+                    #{idx + 1}
+                  </span>
+                  <div className="min-w-0">
+                    <div className="font-medium text-foreground truncate">
+                      {t.companyPrefix ? (
+                        <Link
+                          to={`/${t.companyPrefix}/issues/${t.issueId}`}
+                          className="hover:underline text-foreground"
+                        >
+                          {t.issueTitle}
+                        </Link>
+                      ) : (
+                        t.issueTitle
+                      )}
+                    </div>
+                    <div className="text-(length:--text-micro) text-muted-foreground">
+                      {t.companyName ?? "Organization"} {t.agentName ? `· Agent: ${t.agentName}` : ""}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0 text-right">
+                  <div className="text-right">
+                    <div className="font-mono font-medium text-amber-500">{formatCents(t.simulatedCostCents)}</div>
+                    <div className="text-(length:--text-micro) font-mono text-muted-foreground">{formatTokens(t.totalTokens)}</div>
+                  </div>
+                  {t.companyPrefix && (
+                    <Button variant="ghost" size="icon-sm" asChild className="h-7 w-7">
+                      <Link to={`/${t.companyPrefix}/issues/${t.issueId}`} aria-label="Open task">
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </Link>
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ComputeTimelineCard({
+  timeline,
+  window,
+}: {
+  timeline?: ComputeTimelinePoint[];
+  window: string;
+}) {
+  const [metric, setMetric] = useState<"tokens" | "cost" | "runtime">("tokens");
+
+  const points = timeline ?? [];
+  const maxVal = useMemo(() => {
+    if (points.length === 0) return 1;
+    let max = 0;
+    for (const p of points) {
+      const v = metric === "tokens" ? p.tokens : metric === "cost" ? p.simulatedCostCents : p.runtimeMs;
+      if (v > max) max = v;
+    }
+    return max > 0 ? max : 1;
+  }, [points, metric]);
+
+  return (
+    <Card>
+      <CardHeader className="px-5 pt-5 pb-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-2">
+              <BarChart2 className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-base">Compute Timeline</CardTitle>
+            </div>
+            <CardDescription>
+              {window === "24h" ? "Hourly" : "Daily"} execution trend and model throughput.
+            </CardDescription>
+          </div>
+          <div className="flex items-center gap-1 bg-muted/40 p-0.5 rounded-lg border border-border text-xs">
+            <button
+              type="button"
+              onClick={() => setMetric("tokens")}
+              className={`px-2 py-1 rounded font-medium transition-colors ${
+                metric === "tokens" ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Tokens
+            </button>
+            <button
+              type="button"
+              onClick={() => setMetric("cost")}
+              className={`px-2 py-1 rounded font-medium transition-colors ${
+                metric === "cost" ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Cost
+            </button>
+            <button
+              type="button"
+              onClick={() => setMetric("runtime")}
+              className={`px-2 py-1 rounded font-medium transition-colors ${
+                metric === "runtime" ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Runtime
+            </button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="px-5 pb-5 pt-2">
+        {points.length === 0 ? (
+          <div className="h-36 flex items-center justify-center text-xs text-muted-foreground">
+            No timeline data recorded for this window.
+          </div>
+        ) : (
+          <div className="flex items-end gap-1 sm:gap-2 h-36 w-full pt-4 pb-1 overflow-x-auto">
+            {points.map((pt) => {
+              const val = metric === "tokens" ? pt.tokens : metric === "cost" ? pt.simulatedCostCents : pt.runtimeMs;
+              const heightPct = Math.max(4, Math.round((val / maxVal) * 100));
+              return (
+                <div key={pt.bucket} className="group relative flex-1 min-w-4 flex flex-col items-center justify-end h-full">
+                  <div className="absolute bottom-full mb-2 hidden group-hover:flex flex-col items-center z-20 pointer-events-none">
+                    <div className="rounded border border-border bg-popover text-popover-foreground px-2 py-1 text-xs shadow-md whitespace-nowrap">
+                      <div className="font-semibold">{pt.bucket}</div>
+                      <div className="text-muted-foreground">
+                        {formatTokens(pt.tokens)} tokens · {formatCents(pt.simulatedCostCents)}
+                      </div>
+                      <div className="text-muted-foreground">
+                        {pt.runCount} runs · {formatRuntimeMs(pt.runtimeMs)}
+                      </div>
+                    </div>
+                  </div>
+                  <div
+                    className="w-full rounded-t bg-primary/70 hover:bg-primary transition-all cursor-pointer"
+                    style={{ height: `${heightPct}%` }}
+                  />
+                  <span className="mt-1 text-(length:--text-micro) text-muted-foreground truncate max-w-full font-mono">
+                    {pt.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 function formatUptime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return "0s";
@@ -266,6 +743,16 @@ export function InstanceObservability() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => data && exportObservabilityCsv(data, window)}
+            disabled={!data}
+            className="gap-1.5"
+          >
+            <Download className="h-3.5 w-3.5" />
+            <span>Export CSV</span>
+          </Button>
           {WINDOW_PRESETS.map((preset) => (
             <Button
               key={preset.key}
@@ -290,7 +777,7 @@ export function InstanceObservability() {
         <MetricTile
           label="Total tokens"
           value={formatTokens(data?.totalTokens ?? 0)}
-          subtitle={`${(data?.tokensPerSecond ?? 0) > 0 ? `${data?.tokensPerSecond} tok/s · ` : ""}${formatTokens(data?.inputTokens ?? 0)} in · ${formatTokens(data?.outputTokens ?? 0)} out`}
+          subtitle={`${(data?.tokensPerSecond ?? 0) > 0 ? `${data?.tokensPerSecond} tok/s · ` : ""}${formatTokens(data?.inputTokens ?? 0)} in · ${formatTokens(data?.cachedInputTokens ?? 0)} cached · ${formatTokens(data?.outputTokens ?? 0)} out`}
           icon={Zap}
         />
         <MetricTile
@@ -306,6 +793,24 @@ export function InstanceObservability() {
           icon={DollarSign}
         />
       </div>
+
+      {((data?.cachedInputTokens ?? 0) > 0 || (data?.simulatedCacheSavingsCents ?? 0) > 0) && (
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 text-xs text-foreground">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 shrink-0 text-emerald-500" />
+            <div>
+              <strong className="font-semibold text-emerald-600 dark:text-emerald-400">Prompt Cache Efficiency:</strong>{" "}
+              <span className="font-mono font-medium">{data?.cacheHitRate ?? 0}%</span> of input tokens served from prompt cache ({formatTokens(data?.cachedInputTokens ?? 0)} cached tokens).
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className="text-muted-foreground">Estimated API savings:</span>
+            <Badge variant="secondary" className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono font-semibold">
+              +{formatCents(data?.simulatedCacheSavingsCents ?? 0)} saved
+            </Badge>
+          </div>
+        </div>
+      )}
 
       {data?.host && (
         <Card>
@@ -328,7 +833,7 @@ export function InstanceObservability() {
             </div>
           </CardHeader>
           <CardContent className="px-5 pb-5 pt-2">
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
               <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-1.5">
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
                   <span className="flex items-center gap-1.5">
@@ -362,6 +867,33 @@ export function InstanceObservability() {
                 </div>
                 <div className="text-xs text-muted-foreground">
                   Free: {formatBytes(data.host.freeMemBytes)}
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-1.5">
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span className="flex items-center gap-1.5">
+                    <HardDrive className="h-3.5 w-3.5" />
+                    <span>Disk Storage</span>
+                  </span>
+                  <span className="font-mono font-medium text-foreground">
+                    {data.host.diskTotalBytes != null && data.host.diskTotalBytes > 0
+                      ? `${Math.round(((data.host.diskUsedBytes ?? 0) / data.host.diskTotalBytes) * 100)}%`
+                      : "—"}
+                  </span>
+                </div>
+                <div className="text-xs font-mono text-foreground font-medium">
+                  {data.host.diskTotalBytes != null && data.host.diskTotalBytes > 0 ? (
+                    <>
+                      {formatBytes(data.host.diskUsedBytes ?? 0)}{" "}
+                      <span className="text-muted-foreground font-normal">/ {formatBytes(data.host.diskTotalBytes)}</span>
+                    </>
+                  ) : (
+                    "Available"
+                  )}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {data.host.diskFreeBytes != null ? `Free: ${formatBytes(data.host.diskFreeBytes)}` : "Host filesystem"}
                 </div>
               </div>
 
@@ -404,6 +936,13 @@ export function InstanceObservability() {
           </CardContent>
         </Card>
       )}
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <ModelMixCard models={data?.models} />
+        <CostlyTasksCard tasks={data?.costlyTasks} />
+      </div>
+
+      <ComputeTimelineCard timeline={data?.timeline} window={window} />
 
       <Card className="border-border bg-card">
         <CardContent className="p-4">

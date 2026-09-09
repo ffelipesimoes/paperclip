@@ -1,4 +1,5 @@
 import { Router, type Request } from "express";
+import fs from "node:fs";
 import os from "node:os";
 import { and, count, desc, eq, gte, isNull, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
@@ -15,10 +16,14 @@ import {
   patchInstanceGeneralSettingsSchema,
   startTaskDrainRequestSchema,
   simulateCostCents,
+  simulateCacheSavingsCents,
   type AgentComputeUsage,
   type CompanyComputeUsage,
+  type ComputeTimelinePoint,
+  type CostlyTask,
   type HostComputeResources,
   type InstanceObservabilitySummary,
+  type ModelComputeUsage,
 } from "@paperclipai/shared";
 import { forbidden } from "../errors.js";
 import { isCloudManagedInstance } from "../services/cloud-instance.js";
@@ -449,6 +454,9 @@ export function instanceSettingsRoutes(db: Db) {
       allAgentsList,
       agentRunRows,
       agentCostRows,
+      timelineCostRows,
+      timelineRunRows,
+      costlyTaskRows,
     ] = await Promise.all([
       db
         .select({
@@ -536,6 +544,58 @@ export function instanceSettingsRoutes(db: Db) {
         .from(costEvents)
         .where(costConditions.length > 0 ? and(...costConditions) : undefined)
         .groupBy(costEvents.agentId, costEvents.model, costEvents.provider),
+      db
+        .select({
+          bucket: sql<string>`to_char(date_trunc(${sql.raw(`'${windowParam === "24h" ? "hour" : "day"}'`)}, ${costEvents.occurredAt}), ${sql.raw(`'${windowParam === "24h" ? "YYYY-MM-DD HH24:00" : "YYYY-MM-DD"}'`)})`,
+          model: costEvents.model,
+          provider: costEvents.provider,
+          costCents: sql<number>`coalesce(sum(${costEvents.costCents}), 0)::double precision`,
+          inputTokens: sql<number>`coalesce(sum(${costEvents.inputTokens}), 0)::double precision`,
+          cachedInputTokens: sql<number>`coalesce(sum(${costEvents.cachedInputTokens}), 0)::double precision`,
+          outputTokens: sql<number>`coalesce(sum(${costEvents.outputTokens}), 0)::double precision`,
+        })
+        .from(costEvents)
+        .where(costConditions.length > 0 ? and(...costConditions) : undefined)
+        .groupBy(sql`1`, costEvents.model, costEvents.provider)
+        .orderBy(sql`1 asc`),
+      db
+        .select({
+          bucket: sql<string>`to_char(date_trunc(${sql.raw(`'${windowParam === "24h" ? "hour" : "day"}'`)}, ${heartbeatRuns.startedAt}), ${sql.raw(`'${windowParam === "24h" ? "YYYY-MM-DD HH24:00" : "YYYY-MM-DD"}'`)})`,
+          runCount: sql<number>`count(*)::int`,
+          runtimeMs: sql<number>`coalesce(sum(case when ${heartbeatRuns.startedAt} is not null then extract(epoch from (coalesce(${heartbeatRuns.finishedAt}, now()) - ${heartbeatRuns.startedAt})) * 1000 else 0 end), 0)::double precision`,
+        })
+        .from(heartbeatRuns)
+        .where(runConditions.length > 0 ? and(...runConditions) : undefined)
+        .groupBy(sql`1`)
+        .orderBy(sql`1 asc`),
+      db
+        .select({
+          issueId: costEvents.issueId,
+          issueTitle: issues.title,
+          companyName: companies.name,
+          companyPrefix: companies.issuePrefix,
+          agentName: agents.name,
+          model: costEvents.model,
+          provider: costEvents.provider,
+          costCents: sql<number>`coalesce(sum(${costEvents.costCents}), 0)::double precision`,
+          inputTokens: sql<number>`coalesce(sum(${costEvents.inputTokens}), 0)::double precision`,
+          cachedInputTokens: sql<number>`coalesce(sum(${costEvents.cachedInputTokens}), 0)::double precision`,
+          outputTokens: sql<number>`coalesce(sum(${costEvents.outputTokens}), 0)::double precision`,
+        })
+        .from(costEvents)
+        .innerJoin(issues, eq(costEvents.issueId, issues.id))
+        .innerJoin(companies, eq(costEvents.companyId, companies.id))
+        .innerJoin(agents, eq(costEvents.agentId, agents.id))
+        .where(costConditions.length > 0 ? and(...costConditions) : undefined)
+        .groupBy(
+          costEvents.issueId,
+          issues.title,
+          companies.name,
+          companies.issuePrefix,
+          agents.name,
+          costEvents.model,
+          costEvents.provider,
+        ),
     ]);
 
     const companyMap = new Map<string, CompanyComputeUsage>();
@@ -587,21 +647,24 @@ export function instanceSettingsRoutes(db: Db) {
       }
     }
 
+    const modelMap = new Map<string, ModelComputeUsage>();
+    let simulatedCacheSavingsCents = 0;
+
     for (const row of costRows) {
       const item = companyMap.get(row.companyId);
-      if (item) {
-        const inTok = Number(row.inputTokens ?? 0);
-        const cacheTok = Number(row.cachedInputTokens ?? 0);
-        const outTok = Number(row.outputTokens ?? 0);
-        const costC = Number(row.costCents ?? 0);
-        const simC = simulateCostCents({
-          model: row.model,
-          provider: row.provider,
-          inputTokens: inTok,
-          cachedInputTokens: cacheTok,
-          outputTokens: outTok,
-        });
+      const inTok = Number(row.inputTokens ?? 0);
+      const cacheTok = Number(row.cachedInputTokens ?? 0);
+      const outTok = Number(row.outputTokens ?? 0);
+      const costC = Number(row.costCents ?? 0);
+      const simC = simulateCostCents({
+        model: row.model,
+        provider: row.provider,
+        inputTokens: inTok,
+        cachedInputTokens: cacheTok,
+        outputTokens: outTok,
+      });
 
+      if (item) {
         item.inputTokens += inTok;
         item.cachedInputTokens += cacheTok;
         item.outputTokens += outTok;
@@ -613,6 +676,37 @@ export function instanceSettingsRoutes(db: Db) {
         }
         item.subscriptionRunCount += Number(row.subscriptionRunCount ?? 0);
       }
+
+      // Model breakdown accumulation
+      const modelKey = `${row.provider}:${row.model}`;
+      let modelUsage = modelMap.get(modelKey);
+      if (!modelUsage) {
+        modelUsage = {
+          model: row.model,
+          provider: row.provider,
+          inputTokens: 0,
+          cachedInputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          costCents: 0,
+          simulatedCostCents: 0,
+          percentage: 0,
+        };
+        modelMap.set(modelKey, modelUsage);
+      }
+      modelUsage.inputTokens += inTok;
+      modelUsage.cachedInputTokens += cacheTok;
+      modelUsage.outputTokens += outTok;
+      modelUsage.totalTokens += inTok + cacheTok + outTok;
+      modelUsage.costCents += costC;
+      modelUsage.simulatedCostCents += simC;
+
+      // Cache savings accumulation
+      simulatedCacheSavingsCents += simulateCacheSavingsCents({
+        model: row.model,
+        provider: row.provider,
+        cachedInputTokens: cacheTok,
+      });
     }
 
     const companyList = Array.from(companyMap.values());
@@ -692,9 +786,108 @@ export function instanceSettingsRoutes(db: Db) {
     const totalRuns = companyList.reduce((acc, c) => acc + c.runCount, 0);
     const activeRuns = companyList.reduce((acc, c) => acc + c.activeRunCount, 0);
     const totalRuntimeMs = companyList.reduce((acc, c) => acc + c.runtimeMs, 0);
+    const totalInputTokens = companyList.reduce((acc, c) => acc + c.inputTokens, 0);
+    const totalCachedTokens = companyList.reduce((acc, c) => acc + c.cachedInputTokens, 0);
+    const totalOutputTokens = companyList.reduce((acc, c) => acc + c.outputTokens, 0);
     const totalTokens = companyList.reduce((acc, c) => acc + c.totalTokens, 0);
     const avgRunDurationMs = totalRuns > 0 ? Math.round(totalRuntimeMs / totalRuns) : 0;
     const tokensPerSecond = totalRuntimeMs > 0 ? Math.round((totalTokens / (totalRuntimeMs / 1000)) * 100) / 100 : 0;
+
+    const totalInputAndCached = totalInputTokens + totalCachedTokens;
+    const cacheHitRate = totalInputAndCached > 0 ? Math.round((totalCachedTokens / totalInputAndCached) * 1000) / 10 : 0;
+
+    const modelList = Array.from(modelMap.values());
+    const grandTotalTokens = totalTokens > 0 ? totalTokens : 1;
+    for (const m of modelList) {
+      m.percentage = Math.round((m.totalTokens / grandTotalTokens) * 1000) / 10;
+    }
+    modelList.sort((a, b) => b.totalTokens - a.totalTokens);
+
+    // Timeline aggregation
+    const timelineMap = new Map<string, ComputeTimelinePoint>();
+    for (const row of timelineCostRows) {
+      if (!row.bucket) continue;
+      let point = timelineMap.get(row.bucket);
+      if (!point) {
+        point = {
+          bucket: row.bucket,
+          label: row.bucket.length > 10 ? row.bucket.slice(11) : row.bucket.slice(5),
+          runCount: 0,
+          runtimeMs: 0,
+          tokens: 0,
+          costCents: 0,
+          simulatedCostCents: 0,
+        };
+        timelineMap.set(row.bucket, point);
+      }
+      const inTok = Number(row.inputTokens ?? 0);
+      const cacheTok = Number(row.cachedInputTokens ?? 0);
+      const outTok = Number(row.outputTokens ?? 0);
+      point.tokens += inTok + cacheTok + outTok;
+      point.costCents += Number(row.costCents ?? 0);
+      point.simulatedCostCents += simulateCostCents({
+        model: row.model,
+        provider: row.provider,
+        inputTokens: inTok,
+        cachedInputTokens: cacheTok,
+        outputTokens: outTok,
+      });
+    }
+
+    for (const row of timelineRunRows) {
+      if (!row.bucket) continue;
+      let point = timelineMap.get(row.bucket);
+      if (!point) {
+        point = {
+          bucket: row.bucket,
+          label: row.bucket.length > 10 ? row.bucket.slice(11) : row.bucket.slice(5),
+          runCount: 0,
+          runtimeMs: 0,
+          tokens: 0,
+          costCents: 0,
+          simulatedCostCents: 0,
+        };
+        timelineMap.set(row.bucket, point);
+      }
+      point.runCount += Number(row.runCount ?? 0);
+      point.runtimeMs += Number(row.runtimeMs ?? 0);
+    }
+
+    const timeline = Array.from(timelineMap.values()).sort((a, b) => a.bucket.localeCompare(b.bucket));
+
+    // Top Costly Tasks
+    const taskMap = new Map<string, CostlyTask>();
+    for (const row of costlyTaskRows) {
+      if (!row.issueId) continue;
+      let task = taskMap.get(row.issueId);
+      if (!task) {
+        task = {
+          issueId: row.issueId,
+          issueTitle: row.issueTitle ?? "Untitled task",
+          companyName: row.companyName,
+          companyPrefix: row.companyPrefix,
+          agentName: row.agentName,
+          totalTokens: 0,
+          simulatedCostCents: 0,
+        };
+        taskMap.set(row.issueId, task);
+      }
+      const inTok = Number(row.inputTokens ?? 0);
+      const cacheTok = Number(row.cachedInputTokens ?? 0);
+      const outTok = Number(row.outputTokens ?? 0);
+      task.totalTokens += inTok + cacheTok + outTok;
+      task.simulatedCostCents += simulateCostCents({
+        model: row.model,
+        provider: row.provider,
+        inputTokens: inTok,
+        cachedInputTokens: cacheTok,
+        outputTokens: outTok,
+      });
+    }
+
+    const costlyTasks = Array.from(taskMap.values())
+      .sort((a, b) => b.simulatedCostCents - a.simulatedCostCents || b.totalTokens - a.totalTokens)
+      .slice(0, 5);
 
     const cpus = os.cpus();
     const totalMemBytes = os.totalmem();
@@ -702,6 +895,18 @@ export function instanceSettingsRoutes(db: Db) {
     const usedMemBytes = Math.max(0, totalMemBytes - freeMemBytes);
     const loadAvg = os.loadavg() as [number, number, number];
     const memUsage = process.memoryUsage();
+
+    let diskTotalBytes: number | undefined;
+    let diskFreeBytes: number | undefined;
+    let diskUsedBytes: number | undefined;
+    try {
+      const stats = fs.statfsSync(process.cwd());
+      diskTotalBytes = Number(stats.bsize) * Number(stats.blocks);
+      diskFreeBytes = Number(stats.bsize) * Number(stats.bavail);
+      diskUsedBytes = Math.max(0, diskTotalBytes - diskFreeBytes);
+    } catch {
+      // Ignored if unsupported
+    }
 
     const host: HostComputeResources = {
       cpuCount: cpus.length,
@@ -716,6 +921,9 @@ export function instanceSettingsRoutes(db: Db) {
       uptimeSeconds: Math.round(process.uptime()),
       hostUptimeSeconds: Math.round(os.uptime()),
       activeWorkers: activeRuns,
+      diskTotalBytes,
+      diskFreeBytes,
+      diskUsedBytes,
     };
 
     const summary: InstanceObservabilitySummary = {
@@ -730,15 +938,20 @@ export function instanceSettingsRoutes(db: Db) {
       totalRuntimeMs,
       avgRunDurationMs,
       tokensPerSecond,
-      inputTokens: companyList.reduce((acc, c) => acc + c.inputTokens, 0),
-      cachedInputTokens: companyList.reduce((acc, c) => acc + c.cachedInputTokens, 0),
-      outputTokens: companyList.reduce((acc, c) => acc + c.outputTokens, 0),
+      inputTokens: totalInputTokens,
+      cachedInputTokens: totalCachedTokens,
+      outputTokens: totalOutputTokens,
       totalTokens,
+      cacheHitRate,
+      simulatedCacheSavingsCents,
       billedCostCents: companyList.reduce((acc, c) => acc + c.costCents, 0),
       simulatedCostCents: companyList.reduce((acc, c) => acc + c.simulatedCostCents, 0),
       subscriptionTokens: companyList.reduce((acc, c) => acc + c.subscriptionTokens, 0),
       subscriptionRunCount: companyList.reduce((acc, c) => acc + c.subscriptionRunCount, 0),
       host,
+      models: modelList,
+      timeline,
+      costlyTasks,
       agents: agentList,
       companies: companyList,
     };

@@ -1227,6 +1227,9 @@ export type {
   InstanceObservabilitySummary,
   HostComputeResources,
   AgentComputeUsage,
+  ModelComputeUsage,
+  ComputeTimelinePoint,
+  CostlyTask,
   FinanceEvent,
   FinanceSummary,
   FinanceByBiller,
@@ -2739,4 +2742,5 @@ export {
   resolveModelPricing,
   simulateCostUsd,
   simulateCostCents,
+  simulateCacheSavingsCents,
 } from "./pricing.js";
