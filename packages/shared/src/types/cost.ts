@@ -169,6 +169,41 @@ export interface HostComputeResources {
   uptimeSeconds: number;
   hostUptimeSeconds: number;
   activeWorkers: number;
+  diskTotalBytes?: number;
+  diskFreeBytes?: number;
+  diskUsedBytes?: number;
+}
+
+export interface ModelComputeUsage {
+  model: string;
+  provider: string;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costCents: number;
+  simulatedCostCents: number;
+  percentage: number;
+}
+
+export interface ComputeTimelinePoint {
+  bucket: string;
+  label: string;
+  runCount: number;
+  runtimeMs: number;
+  tokens: number;
+  costCents: number;
+  simulatedCostCents: number;
+}
+
+export interface CostlyTask {
+  issueId: string;
+  issueTitle: string;
+  companyName: string;
+  companyPrefix: string;
+  agentName: string;
+  totalTokens: number;
+  simulatedCostCents: number;
 }
 
 export interface AgentComputeUsage {
@@ -208,11 +243,16 @@ export interface InstanceObservabilitySummary {
   cachedInputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  cacheHitRate: number;
+  simulatedCacheSavingsCents: number;
   billedCostCents: number;
   simulatedCostCents: number;
   subscriptionTokens: number;
   subscriptionRunCount: number;
   host?: HostComputeResources;
+  models: ModelComputeUsage[];
+  timeline: ComputeTimelinePoint[];
+  costlyTasks: CostlyTask[];
   agents: AgentComputeUsage[];
   companies: CompanyComputeUsage[];
 }

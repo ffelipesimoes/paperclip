@@ -1379,6 +1379,38 @@ describe("instance settings routes", () => {
           outputTokens: 2000,
         },
       ];
+      const mockTimelineCostRows = [
+        {
+          bucket: "2026-09-09",
+          model: "claude-3-5-sonnet",
+          provider: "anthropic",
+          costCents: 0,
+          inputTokens: 10000,
+          cachedInputTokens: 0,
+          outputTokens: 2000,
+        },
+      ];
+      const mockTimelineRunRows = [
+        {
+          bucket: "2026-09-09",
+          runCount: 10,
+          runtimeMs: 30000,
+        },
+      ];
+      const mockCostlyTaskRows = [
+        {
+          issueId: "issue-1",
+          issueTitle: "Test issue",
+          companyName: "Company 1",
+          companyPrefix: "COMP",
+          agentName: "Agent 1",
+          model: "claude-3-5-sonnet",
+          provider: "anthropic",
+          inputTokens: 10000,
+          cachedInputTokens: 0,
+          outputTokens: 2000,
+        },
+      ];
 
       let selectCallIndex = 0;
       mockDb.select.mockImplementation(() => {
@@ -1391,6 +1423,9 @@ describe("instance settings routes", () => {
           mockAgentList,
           mockAgentRuns,
           mockAgentCosts,
+          mockTimelineCostRows,
+          mockTimelineRunRows,
+          mockCostlyTaskRows,
         ];
         const data = calls[selectCallIndex++] ?? [];
         return createMockSelectChain(data);
@@ -1414,6 +1449,14 @@ describe("instance settings routes", () => {
       expect(res.body.agents).toHaveLength(1);
       expect(res.body.agents[0].agentId).toBe("agent-1");
       expect(res.body.agents[0].tokensPerSecond).toBeGreaterThan(0);
+      expect(res.body.models).toHaveLength(1);
+      expect(res.body.models[0].model).toBe("claude-3-5-sonnet");
+      expect(res.body.timeline).toHaveLength(1);
+      expect(res.body.timeline[0].bucket).toBe("2026-09-09");
+      expect(res.body.costlyTasks).toHaveLength(1);
+      expect(res.body.costlyTasks[0].issueId).toBe("issue-1");
+      expect(res.body.cacheHitRate).toBeDefined();
+      expect(res.body.simulatedCacheSavingsCents).toBeDefined();
     });
 
     it("allows company owner board actors and returns aggregated observability summary", async () => {
@@ -1430,7 +1473,7 @@ describe("instance settings routes", () => {
       ];
       let selectCallIndex = 0;
       mockDb.select.mockImplementation(() => {
-        const calls = [mockCompanies, [], [], [], [], [], [], []];
+        const calls = [mockCompanies, [], [], [], [], [], [], [], [], [], []];
         const data = calls[selectCallIndex++] ?? [];
         return createMockSelectChain(data);
       });

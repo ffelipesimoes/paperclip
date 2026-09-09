@@ -77,3 +77,15 @@ export function simulateCostCents(input: {
   const usd = simulateCostUsd(input);
   return Math.round(usd * 100);
 }
+
+export function simulateCacheSavingsCents(input: {
+  model?: string | null;
+  provider?: string | null;
+  cachedInputTokens: number;
+}): number {
+  const pricing = resolveModelPricing(input.model ?? "", input.provider ?? "");
+  const cachedTokens = Math.max(0, Number(input.cachedInputTokens) || 0);
+  const diffPerMillion = Math.max(0, pricing.inputPerMillionUsd - pricing.cachedInputPerMillionUsd);
+  const savingsUsd = (cachedTokens / 1_000_000) * diffPerMillion;
+  return Math.round(savingsUsd * 100);
+}

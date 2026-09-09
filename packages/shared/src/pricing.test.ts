@@ -3,6 +3,7 @@ import {
   resolveModelPricing,
   simulateCostCents,
   simulateCostUsd,
+  simulateCacheSavingsCents,
   KNOWN_MODEL_PRICING,
   DEFAULT_CLAUDE_PRICING,
 } from "./pricing.js";
@@ -61,5 +62,17 @@ describe("pricing simulation", () => {
     });
     expect(usd).toBe(0);
     expect(simulateCostCents({ inputTokens: 0, outputTokens: 0 })).toBe(0);
+  });
+
+  it("calculates prompt cache savings correctly", () => {
+    // 1,000,000 cached input tokens on Sonnet:
+    // Standard input price: $3.00
+    // Cached input price: $0.30
+    // Savings: $2.70 = 270 cents
+    const savings = simulateCacheSavingsCents({
+      model: "claude-3-7-sonnet",
+      cachedInputTokens: 1_000_000,
+    });
+    expect(savings).toBe(270);
   });
 });
