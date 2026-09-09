@@ -207,6 +207,65 @@ export interface CostlyTask {
   agentName: string;
   totalTokens: number;
   simulatedCostCents: number;
+  latestRunId?: string | null;
+}
+
+export interface AgentTraceNode {
+  id: string;
+  seq: number;
+  parentId?: string | null;
+  kind: "thought" | "tool_call" | "subagent" | "message" | "lifecycle" | "error";
+  title: string;
+  name?: string;
+  status: "success" | "running" | "error";
+  durationMs?: number;
+  tokens?: { input: number; cached: number; output: number };
+  input?: unknown;
+  output?: unknown;
+  startedAt: string;
+  finishedAt?: string;
+  children?: AgentTraceNode[];
+}
+
+export interface AgentRunTrace {
+  runId: string;
+  agentId: string;
+  agentName: string;
+  issueId?: string | null;
+  issueTitle?: string | null;
+  companyPrefix?: string | null;
+  status: string;
+  startedAt: string;
+  finishedAt?: string | null;
+  durationMs: number;
+  totalTokens: number;
+  simulatedCostCents: number;
+  nodes: AgentTraceNode[];
+}
+
+export interface TaskCostDetail {
+  issueId: string;
+  issueTitle: string;
+  issueNumber?: number | null;
+  identifier?: string | null;
+  companyId: string;
+  companyName: string;
+  companyPrefix: string;
+  status: string;
+  priority: string;
+  originKind: string;
+  createdByUserId?: string | null;
+  agentName?: string | null;
+  runCount: number;
+  runtimeMs: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  cacheHitRate: number;
+  costCents: number;
+  simulatedCostCents: number;
+  latestRunId?: string | null;
 }
 
 export interface AgentComputeUsage {
@@ -256,6 +315,7 @@ export interface InstanceObservabilitySummary {
   models: ModelComputeUsage[];
   timeline: ComputeTimelinePoint[];
   costlyTasks: CostlyTask[];
+  tasks: TaskCostDetail[];
   agents: AgentComputeUsage[];
   companies: CompanyComputeUsage[];
 }

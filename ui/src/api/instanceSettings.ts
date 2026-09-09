@@ -6,6 +6,7 @@ import type {
   PatchInstanceGeneralSettings,
   PatchInstanceExperimentalSettings,
   InstanceObservabilitySummary,
+  AgentRunTrace,
 } from "@paperclipai/shared";
 import { api } from "./client";
 
@@ -24,4 +25,6 @@ export const instanceSettingsApi = {
     api.patch<InstanceExperimentalSettingsWithManaged>("/instance/settings/experimental", patch),
   getObservability: (window?: string) =>
     api.get<InstanceObservabilitySummary>(window ? `/instance/observability?window=${encodeURIComponent(window)}` : "/instance/observability"),
+  getRunTrace: (runId: string) =>
+    api.get<AgentRunTrace>(`/instance/observability/runs/${encodeURIComponent(runId)}/trace`),
 };
