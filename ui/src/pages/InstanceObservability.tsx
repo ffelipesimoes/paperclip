@@ -14,6 +14,7 @@ import {
   Download,
   ExternalLink,
   Flame,
+  GitFork,
   HardDrive,
   Info,
   PieChart,
@@ -28,6 +29,7 @@ import type {
   ModelComputeUsage,
   ComputeTimelinePoint,
   CostlyTask,
+  TaskCostDetail,
 } from "@paperclipai/shared";
 import { Link } from "@/lib/router";
 import { instanceSettingsApi } from "@/api/instanceSettings";
@@ -39,6 +41,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AgentStatusBadge } from "@/components/StatusBadge";
+import { AgentTraceViewer } from "@/components/AgentTraceViewer";
 import { formatBytes, formatCents, formatDurationMs, formatRuntimeMs, formatTokens } from "@/lib/utils";
 
 const WINDOW_PRESETS = [
@@ -269,6 +272,59 @@ function exportObservabilityCsv(data: InstanceObservabilitySummary, windowKey: s
     }
   }
 
+  // Section 5: Task Costs & Workflow Attribution
+  if (data.tasks && data.tasks.length > 0) {
+    rows.push("");
+    rows.push("=== TASK COSTS & WORKFLOW ATTRIBUTION ===");
+    rows.push(
+      [
+        "Issue ID",
+        "Identifier",
+        "Task Title",
+        "Company",
+        "Agent",
+        "Status",
+        "Priority",
+        "Origin",
+        "Runs",
+        "Total Tokens",
+        "Input Tokens",
+        "Cached Tokens",
+        "Output Tokens",
+        "Cache Hit Rate (%)",
+        "Simulated Cost ($)",
+        "Billed Cost ($)",
+      ]
+        .map(escape)
+        .join(","),
+    );
+
+    for (const t of data.tasks) {
+      rows.push(
+        [
+          t.issueId,
+          t.identifier ?? "",
+          t.issueTitle,
+          t.companyName ?? "",
+          t.agentName ?? "",
+          t.status,
+          t.priority,
+          t.originKind,
+          t.runCount,
+          t.totalTokens,
+          t.inputTokens,
+          t.cachedInputTokens,
+          t.outputTokens,
+          `${t.cacheHitRate}%`,
+          (t.simulatedCostCents / 100).toFixed(2),
+          (t.costCents / 100).toFixed(2),
+        ]
+          .map(escape)
+          .join(","),
+      );
+    }
+  }
+
   const csvContent = "\uFEFF" + rows.join("\r\n");
   const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
@@ -344,7 +400,13 @@ function ModelMixCard({ models }: { models?: ModelComputeUsage[] }) {
   );
 }
 
-function CostlyTasksCard({ tasks }: { tasks?: CostlyTask[] }) {
+function CostlyTasksCard({
+  tasks,
+  onSelectRun,
+}: {
+  tasks?: CostlyTask[];
+  onSelectRun?: (runId: string) => void;
+}) {
   const taskList = tasks ?? [];
 
   return (
@@ -402,6 +464,18 @@ function CostlyTasksCard({ tasks }: { tasks?: CostlyTask[] }) {
                       <Link to={`/${t.companyPrefix}/issues/${t.issueId}`} aria-label="Open task">
                         <ExternalLink className="h-3.5 w-3.5" />
                       </Link>
+                    </Button>
+                  )}
+                  {onSelectRun && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs px-2 gap-1 text-sky-600 dark:text-sky-400 border-sky-500/30 hover:bg-sky-500/10"
+                      onClick={() => onSelectRun(t.latestRunId ?? t.issueId)}
+                      title="Ver Árvore de Rastreio (Trace)"
+                    >
+                      <GitFork className="h-3 w-3" />
+                      <span>Trace</span>
                     </Button>
                   )}
                 </div>
@@ -748,12 +822,17 @@ function MetricTile({
 export function InstanceObservability() {
   const { setBreadcrumbs } = useBreadcrumbs();
   const [window, setWindow] = useState<WindowKey>("30d");
-  const [activeTab, setActiveTab] = useState<"organizations" | "agents">("organizations");
+  const [activeTab, setActiveTab] = useState<"organizations" | "agents" | "tasks">("organizations");
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [taskSearch, setTaskSearch] = useState("");
+  const [taskStatusFilter, setTaskStatusFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<SortField>("runtime");
   const [sortAsc, setSortAsc] = useState(false);
   const [agentSortBy, setAgentSortBy] = useState<AgentSortField>("tokens");
   const [agentSortAsc, setAgentSortAsc] = useState(false);
+  const [taskSortBy, setTaskSortBy] = useState<"tokens" | "simulatedCost" | "cost" | "runs" | "title">("simulatedCost");
+  const [taskSortAsc, setTaskSortAsc] = useState(false);
 
   useEffect(() => {
     setBreadcrumbs([
@@ -873,6 +952,62 @@ export function InstanceObservability() {
     } else {
       setAgentSortBy(field);
       setAgentSortAsc(false);
+    }
+  };
+
+  const filteredAndSortedTasks = useMemo(() => {
+    if (!data?.tasks) return [];
+    let list = [...data.tasks];
+
+    if (taskStatusFilter !== "all") {
+      list = list.filter((t) => t.status.toLowerCase() === taskStatusFilter.toLowerCase());
+    }
+
+    if (taskSearch.trim()) {
+      const q = taskSearch.trim().toLowerCase();
+      list = list.filter(
+        (t) =>
+          t.issueTitle.toLowerCase().includes(q) ||
+          (t.identifier && t.identifier.toLowerCase().includes(q)) ||
+          (t.agentName && t.agentName.toLowerCase().includes(q)) ||
+          (t.companyName && t.companyName.toLowerCase().includes(q)) ||
+          (t.companyPrefix && t.companyPrefix.toLowerCase().includes(q)) ||
+          (t.createdByUserId && t.createdByUserId.toLowerCase().includes(q)) ||
+          (t.originKind && t.originKind.toLowerCase().includes(q)),
+      );
+    }
+
+    list.sort((a, b) => {
+      let diff = 0;
+      switch (taskSortBy) {
+        case "tokens":
+          diff = a.totalTokens - b.totalTokens;
+          break;
+        case "simulatedCost":
+          diff = a.simulatedCostCents - b.simulatedCostCents;
+          break;
+        case "cost":
+          diff = a.costCents - b.costCents;
+          break;
+        case "runs":
+          diff = a.runCount - b.runCount;
+          break;
+        case "title":
+          diff = a.issueTitle.localeCompare(b.issueTitle);
+          break;
+      }
+      return taskSortAsc ? diff : -diff;
+    });
+
+    return list;
+  }, [data?.tasks, taskSearch, taskStatusFilter, taskSortBy, taskSortAsc]);
+
+  const handleTaskSort = (field: "tokens" | "simulatedCost" | "cost" | "runs" | "title") => {
+    if (taskSortBy === field) {
+      setTaskSortAsc(!taskSortAsc);
+    } else {
+      setTaskSortBy(field);
+      setTaskSortAsc(false);
     }
   };
 
@@ -1130,7 +1265,7 @@ export function InstanceObservability() {
 
       <div className="grid gap-6 lg:grid-cols-2">
         <ModelMixCard models={data?.models} />
-        <CostlyTasksCard tasks={data?.costlyTasks} />
+        <CostlyTasksCard tasks={data?.costlyTasks} onSelectRun={setSelectedRunId} />
       </div>
 
       <ComputeTimelineCard timeline={data?.timeline} window={window} />
@@ -1155,8 +1290,9 @@ export function InstanceObservability() {
       <Tabs
         value={activeTab}
         onValueChange={(val) => {
-          setActiveTab(val as "organizations" | "agents");
+          setActiveTab(val as "organizations" | "agents" | "tasks");
           setSearch("");
+          setTaskSearch("");
         }}
         className="w-full"
       >
@@ -1178,14 +1314,33 @@ export function InstanceObservability() {
                     {data?.agents?.length ?? 0}
                   </Badge>
                 </TabsTrigger>
+                <TabsTrigger value="tasks" className="gap-2">
+                  <Flame className="h-4 w-4 text-amber-500" />
+                  <span>Tarefas & Custos</span>
+                  <Badge variant="secondary" className="text-xs px-1.5 py-0">
+                    {data?.tasks?.length ?? 0}
+                  </Badge>
+                </TabsTrigger>
               </TabsList>
 
               <div className="relative w-full sm:w-64">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder={activeTab === "organizations" ? "Search organizations…" : "Search agents or roles…"}
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder={
+                    activeTab === "organizations"
+                      ? "Search organizations…"
+                      : activeTab === "agents"
+                      ? "Search agents or roles…"
+                      : "Buscar tarefa, agente, ID…"
+                  }
+                  value={activeTab === "tasks" ? taskSearch : search}
+                  onChange={(e) => {
+                    if (activeTab === "tasks") {
+                      setTaskSearch(e.target.value);
+                    } else {
+                      setSearch(e.target.value);
+                    }
+                  }}
                   className="pl-8 text-xs"
                 />
               </div>
@@ -1495,9 +1650,185 @@ export function InstanceObservability() {
                 </table>
               </div>
             </TabsContent>
+
+            <TabsContent value="tasks" className="m-0">
+              <div className="p-4 border-b border-border/60 bg-muted/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-medium text-muted-foreground">Filtrar por status:</span>
+                  {(["all", "in_progress", "done", "todo", "backlog"] as const).map((st) => (
+                    <Button
+                      key={st}
+                      variant={taskStatusFilter === st ? "secondary" : "ghost"}
+                      size="sm"
+                      onClick={() => setTaskStatusFilter(st)}
+                      className="h-7 text-xs px-2.5 capitalize"
+                    >
+                      {st === "all" ? "Todos" : st === "in_progress" ? "Em Progresso" : st === "done" ? "Concluído" : st}
+                    </Button>
+                  ))}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Mostrando <strong className="text-foreground">{filteredAndSortedTasks.length}</strong> de{" "}
+                  <strong>{data?.tasks?.length ?? 0}</strong> tarefas com consumo
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/30 text-xs text-muted-foreground">
+                      <th className="px-5 py-3 font-medium">
+                        <button
+                          type="button"
+                          onClick={() => handleTaskSort("title")}
+                          className="flex items-center gap-1 hover:text-foreground"
+                        >
+                          <span>Tarefa & Origem</span>
+                          <ArrowUpDown className="h-3 w-3" />
+                        </button>
+                      </th>
+                      <th className="px-5 py-3 font-medium">Agente & Org</th>
+                      <th className="px-5 py-3 font-medium">Status</th>
+                      <th className="px-5 py-3 font-medium">
+                        <button
+                          type="button"
+                          onClick={() => handleTaskSort("runs")}
+                          className="flex items-center gap-1 hover:text-foreground"
+                        >
+                          <span>Execuções</span>
+                          <ArrowUpDown className="h-3 w-3" />
+                        </button>
+                      </th>
+                      <th className="px-5 py-3 font-medium">
+                        <button
+                          type="button"
+                          onClick={() => handleTaskSort("tokens")}
+                          className="flex items-center gap-1 hover:text-foreground"
+                        >
+                          <span>Tokens & Cache</span>
+                          <ArrowUpDown className="h-3 w-3" />
+                        </button>
+                      </th>
+                      <th className="px-5 py-3 font-medium">
+                        <button
+                          type="button"
+                          onClick={() => handleTaskSort("simulatedCost")}
+                          className="flex items-center gap-1 hover:text-foreground"
+                        >
+                          <span>Custo Simulado</span>
+                          <ArrowUpDown className="h-3 w-3" />
+                        </button>
+                      </th>
+                      <th className="px-5 py-3 text-right font-medium">Rastreio (Trace)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {filteredAndSortedTasks.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="px-5 py-12 text-center text-xs text-muted-foreground">
+                          Nenhuma tarefa encontrada com consumo de computação.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredAndSortedTasks.map((task) => (
+                        <tr key={task.issueId} className="hover:bg-muted/30 transition-colors">
+                          <td className="px-5 py-3.5 align-top">
+                            <div className="font-medium text-foreground">
+                              {task.companyPrefix ? (
+                                <Link
+                                  to={`/${task.companyPrefix}/issues/${task.issueId}`}
+                                  className="hover:underline flex items-center gap-1.5"
+                                >
+                                  {task.identifier && (
+                                    <span className="font-mono text-xs text-muted-foreground">
+                                      {task.identifier}
+                                    </span>
+                                  )}
+                                  <span>{task.issueTitle}</span>
+                                </Link>
+                              ) : (
+                                <span>{task.issueTitle}</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
+                              <Badge variant="outline" className="text-xs px-1 py-0 capitalize">
+                                {task.originKind || "manual"}
+                              </Badge>
+                              {task.createdByUserId && <span>Criado por {task.createdByUserId}</span>}
+                            </div>
+                          </td>
+
+                          <td className="px-5 py-3.5 align-top">
+                            <div className="font-medium text-foreground">{task.agentName ?? "Sem agente"}</div>
+                            <div className="text-xs text-muted-foreground">{task.companyName}</div>
+                          </td>
+
+                          <td className="px-5 py-3.5 align-top">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <Badge variant="secondary" className="capitalize text-xs">
+                                {task.status}
+                              </Badge>
+                              <span className="text-xs text-muted-foreground capitalize">
+                                {task.priority}
+                              </span>
+                            </div>
+                          </td>
+
+                          <td className="px-5 py-3.5 align-top">
+                            <div className="font-mono text-sm font-medium">{task.runCount}</div>
+                            <div className="text-xs text-muted-foreground">runs executadas</div>
+                          </td>
+
+                          <td className="px-5 py-3.5 align-top">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-sm font-medium">{formatTokens(task.totalTokens)}</span>
+                              {task.cacheHitRate > 0 && (
+                                <Badge variant="secondary" className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs px-1 py-0">
+                                  {task.cacheHitRate}% cache
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {formatTokens(task.inputTokens)} in · {formatTokens(task.outputTokens)} out
+                            </div>
+                          </td>
+
+                          <td className="px-5 py-3.5 align-top">
+                            <div className="font-mono text-sm font-medium text-amber-500">
+                              {formatCents(task.simulatedCostCents)}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {task.costCents > 0 ? `faturado: ${formatCents(task.costCents)}` : "subscription ($0)"}
+                            </div>
+                          </td>
+
+                          <td className="px-5 py-3.5 text-right align-top">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="gap-1.5 text-xs h-8 text-sky-600 dark:text-sky-400 border-sky-500/30 hover:bg-sky-500/10"
+                              onClick={() => setSelectedRunId(task.latestRunId ?? task.issueId)}
+                              title="Visualizar Árvore de Rastreio (Trace Tree)"
+                            >
+                              <GitFork className="h-3.5 w-3.5" />
+                              <span>Ver Trace</span>
+                            </Button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </TabsContent>
           </CardContent>
         </Card>
       </Tabs>
+
+      <AgentTraceViewer
+        runId={selectedRunId}
+        onClose={() => setSelectedRunId(null)}
+      />
     </div>
   );
 }

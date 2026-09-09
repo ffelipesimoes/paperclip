@@ -1,12 +1,13 @@
 import { Router, type Request } from "express";
 import fs from "node:fs";
 import os from "node:os";
-import { and, count, desc, eq, gte, isNull, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import {
   agents,
   companies,
   costEvents,
+  heartbeatRunEvents,
   heartbeatRuns,
   issues,
 } from "@paperclipai/db";
@@ -18,12 +19,15 @@ import {
   simulateCostCents,
   simulateCacheSavingsCents,
   type AgentComputeUsage,
+  type AgentRunTrace,
+  type AgentTraceNode,
   type CompanyComputeUsage,
   type ComputeTimelinePoint,
   type CostlyTask,
   type HostComputeResources,
   type InstanceObservabilitySummary,
   type ModelComputeUsage,
+  type TaskCostDetail,
 } from "@paperclipai/shared";
 import { forbidden } from "../errors.js";
 import { isCloudManagedInstance } from "../services/cloud-instance.js";
@@ -572,11 +576,20 @@ export function instanceSettingsRoutes(db: Db) {
         .select({
           issueId: costEvents.issueId,
           issueTitle: issues.title,
+          issueNumber: issues.issueNumber,
+          identifier: issues.identifier,
+          status: issues.status,
+          priority: issues.priority,
+          originKind: issues.originKind,
+          createdByUserId: issues.createdByUserId,
+          companyId: costEvents.companyId,
           companyName: companies.name,
           companyPrefix: companies.issuePrefix,
           agentName: agents.name,
           model: costEvents.model,
           provider: costEvents.provider,
+          runCount: sql<number>`count(distinct ${costEvents.heartbeatRunId})::int`,
+          latestRunId: sql<string | null>`coalesce(max(${costEvents.heartbeatRunId}::text), max(${issues.executionRunId}::text), max(${issues.checkoutRunId}::text))`,
           costCents: sql<number>`coalesce(sum(${costEvents.costCents}), 0)::double precision`,
           inputTokens: sql<number>`coalesce(sum(${costEvents.inputTokens}), 0)::double precision`,
           cachedInputTokens: sql<number>`coalesce(sum(${costEvents.cachedInputTokens}), 0)::double precision`,
@@ -590,6 +603,13 @@ export function instanceSettingsRoutes(db: Db) {
         .groupBy(
           costEvents.issueId,
           issues.title,
+          issues.issueNumber,
+          issues.identifier,
+          issues.status,
+          issues.priority,
+          issues.originKind,
+          issues.createdByUserId,
+          costEvents.companyId,
           companies.name,
           companies.issuePrefix,
           agents.name,
@@ -864,8 +884,8 @@ export function instanceSettingsRoutes(db: Db) {
 
     const timeline = Array.from(timelineMap.values()).sort((a, b) => a.bucket.localeCompare(b.bucket));
 
-    // Top Costly Tasks
-    const taskMap = new Map<string, CostlyTask>();
+    // Top Costly Tasks & Granular Task Costs
+    const taskMap = new Map<string, TaskCostDetail>();
     for (const row of costlyTaskRows) {
       if (!row.issueId) continue;
       let task = taskMap.get(row.issueId);
@@ -873,18 +893,37 @@ export function instanceSettingsRoutes(db: Db) {
         task = {
           issueId: row.issueId,
           issueTitle: row.issueTitle ?? "Untitled task",
+          issueNumber: row.issueNumber ?? null,
+          identifier: row.identifier ?? null,
+          companyId: row.companyId,
           companyName: row.companyName,
           companyPrefix: row.companyPrefix,
+          status: row.status ?? "backlog",
+          priority: row.priority ?? "medium",
+          originKind: row.originKind ?? "manual",
+          createdByUserId: row.createdByUserId ?? null,
           agentName: row.agentName,
+          runCount: Number(row.runCount ?? 1),
+          runtimeMs: 0,
+          inputTokens: 0,
+          cachedInputTokens: 0,
+          outputTokens: 0,
           totalTokens: 0,
+          cacheHitRate: 0,
+          costCents: 0,
           simulatedCostCents: 0,
+          latestRunId: row.latestRunId ?? null,
         };
         taskMap.set(row.issueId, task);
       }
       const inTok = Number(row.inputTokens ?? 0);
       const cacheTok = Number(row.cachedInputTokens ?? 0);
       const outTok = Number(row.outputTokens ?? 0);
+      task.inputTokens += inTok;
+      task.cachedInputTokens += cacheTok;
+      task.outputTokens += outTok;
       task.totalTokens += inTok + cacheTok + outTok;
+      task.costCents += Number(row.costCents ?? 0);
       task.simulatedCostCents += simulateCostCents({
         model: row.model,
         provider: row.provider,
@@ -892,11 +931,29 @@ export function instanceSettingsRoutes(db: Db) {
         cachedInputTokens: cacheTok,
         outputTokens: outTok,
       });
+      if (row.latestRunId && !task.latestRunId) {
+        task.latestRunId = row.latestRunId;
+      }
     }
 
-    const costlyTasks = Array.from(taskMap.values())
-      .sort((a, b) => b.simulatedCostCents - a.simulatedCostCents || b.totalTokens - a.totalTokens)
-      .slice(0, 5);
+    for (const t of taskMap.values()) {
+      const inAndCache = t.inputTokens + t.cachedInputTokens;
+      t.cacheHitRate = inAndCache > 0 ? Math.round((t.cachedInputTokens / inAndCache) * 1000) / 10 : 0;
+    }
+
+    const allTasks: TaskCostDetail[] = Array.from(taskMap.values())
+      .sort((a, b) => b.simulatedCostCents - a.simulatedCostCents || b.totalTokens - a.totalTokens);
+
+    const costlyTasks: CostlyTask[] = allTasks.slice(0, 5).map((t) => ({
+      issueId: t.issueId,
+      issueTitle: t.issueTitle,
+      companyName: t.companyName,
+      companyPrefix: t.companyPrefix,
+      agentName: t.agentName ?? "Unknown agent",
+      totalTokens: t.totalTokens,
+      simulatedCostCents: t.simulatedCostCents,
+      latestRunId: t.latestRunId,
+    }));
 
     const cpus = os.cpus();
     const totalMemBytes = os.totalmem();
@@ -961,11 +1018,276 @@ export function instanceSettingsRoutes(db: Db) {
       models: modelList,
       timeline,
       costlyTasks,
+      tasks: allTasks,
       agents: agentList,
       companies: companyList,
     };
 
     res.json(summary);
+  });
+
+  router.get("/instance/observability/runs/:runId/trace", async (req, res) => {
+    assertCanManageInstanceSettings(req);
+    const { runId } = req.params;
+
+    const [run] = await db
+      .select({
+        id: heartbeatRuns.id,
+        agentId: heartbeatRuns.agentId,
+        agentName: agents.name,
+        companyId: heartbeatRuns.companyId,
+        companyPrefix: companies.issuePrefix,
+        issueId: issues.id,
+        issueTitle: issues.title,
+        status: heartbeatRuns.status,
+        startedAt: heartbeatRuns.startedAt,
+        finishedAt: heartbeatRuns.finishedAt,
+        error: heartbeatRuns.error,
+        stdoutExcerpt: heartbeatRuns.stdoutExcerpt,
+        stderrExcerpt: heartbeatRuns.stderrExcerpt,
+        usageJson: heartbeatRuns.usageJson,
+        resultJson: heartbeatRuns.resultJson,
+      })
+      .from(heartbeatRuns)
+      .innerJoin(agents, eq(heartbeatRuns.agentId, agents.id))
+      .innerJoin(companies, eq(heartbeatRuns.companyId, companies.id))
+      .leftJoin(issues, eq(heartbeatRuns.nativeIssueId, issues.id))
+      .where(or(eq(heartbeatRuns.id, runId), eq(heartbeatRuns.nativeIssueId, runId)))
+      .orderBy(desc(heartbeatRuns.createdAt))
+      .limit(1);
+
+    if (!run) {
+      return res.status(404).json({ error: "Run not found" });
+    }
+
+    const [events, runCostEvents] = await Promise.all([
+      db
+        .select()
+        .from(heartbeatRunEvents)
+        .where(eq(heartbeatRunEvents.runId, run.id))
+        .orderBy(asc(heartbeatRunEvents.seq)),
+      db
+        .select()
+        .from(costEvents)
+        .where(eq(costEvents.heartbeatRunId, run.id)),
+    ]);
+
+    let totalTokens = 0;
+    let simulatedCostCents = 0;
+    for (const c of runCostEvents) {
+      const inTok = Number(c.inputTokens ?? 0);
+      const cacheTok = Number(c.cachedInputTokens ?? 0);
+      const outTok = Number(c.outputTokens ?? 0);
+      totalTokens += inTok + cacheTok + outTok;
+      simulatedCostCents += simulateCostCents({
+        model: c.model,
+        provider: c.provider,
+        inputTokens: inTok,
+        cachedInputTokens: cacheTok,
+        outputTokens: outTok,
+      });
+    }
+
+    if (totalTokens === 0 && run.usageJson) {
+      const u = run.usageJson as Record<string, unknown>;
+      const inTok = Number(u.inputTokens ?? u.input_tokens ?? 0);
+      const cacheTok = Number(u.cachedInputTokens ?? u.cached_input_tokens ?? 0);
+      const outTok = Number(u.outputTokens ?? u.output_tokens ?? 0);
+      totalTokens = inTok + cacheTok + outTok;
+    }
+
+    const durationMs = run.startedAt
+      ? Math.max(0, (run.finishedAt ? new Date(run.finishedAt).getTime() : Date.now()) - new Date(run.startedAt).getTime())
+      : 0;
+
+    const rawNodes: AgentTraceNode[] = [];
+    for (const ev of events) {
+      const payload = (ev.payload ?? {}) as Record<string, any>;
+      const evType = (ev.eventType || "").toLowerCase();
+      const msg = ev.message || "";
+
+      let kind: AgentTraceNode["kind"] = "lifecycle";
+      let title = msg || evType;
+      let name: string | undefined;
+      let status: "success" | "running" | "error" = "success";
+      let nodeDurationMs: number | undefined;
+      let input: unknown;
+      let output: unknown;
+
+      if (evType.includes("thought") || evType.includes("thinking") || payload.thought) {
+        kind = "thought";
+        title = "Raciocínio (Chain-of-Thought)";
+        output = payload.thought ?? payload.content ?? msg;
+      } else if (
+        evType.includes("tool") ||
+        evType.startsWith("call_") ||
+        evType.includes("workspace.") ||
+        payload.toolName ||
+        payload.tool_name ||
+        payload.tool
+      ) {
+        kind = "tool_call";
+        name = payload.toolName || payload.tool_name || payload.tool || (msg.split(" ")[0] || "tool");
+        title = `Ferramenta: ${name}`;
+        input = payload.input ?? payload.args ?? payload.parameters;
+        output = payload.output ?? payload.result ?? payload.response ?? payload.diff;
+        if (typeof payload.durationMs === "number") nodeDurationMs = payload.durationMs;
+        if (evType.includes("fail") || payload.error) status = "error";
+      } else if (evType.includes("subagent") || payload.subagent || payload.subagentRole) {
+        kind = "subagent";
+        name = payload.subagentRole || payload.subagentType || payload.agentName || "Sub-agente";
+        title = `Sub-agente: ${name}`;
+        input = payload.prompt ?? payload.input;
+        output = payload.result ?? payload.output;
+        if (evType.includes("fail") || payload.error) status = "error";
+      } else if (evType.includes("message") || evType === "item.completed") {
+        kind = "message";
+        title = "Resposta do Agente";
+        output = payload.content ?? payload.text ?? msg;
+      } else if (evType.includes("error") || ev.level === "error" || payload.error) {
+        kind = "error";
+        status = "error";
+        title = "Erro na Execução";
+        output = payload.error || msg;
+      } else if (evType === "run.phase.timing" || evType === "run.startup.step" || evType === "lifecycle") {
+        kind = "lifecycle";
+        if (payload.phase) {
+          title = `Fase: ${payload.phase}`;
+        } else if (payload.step) {
+          title = `Startup: ${payload.step}`;
+        } else {
+          title = msg || "Ciclo de Vida";
+        }
+        if (typeof payload.durationMs === "number") nodeDurationMs = payload.durationMs;
+        if (payload.outcome === "failed") status = "error";
+      }
+
+      rawNodes.push({
+        id: `node-${ev.seq}`,
+        seq: Number(ev.seq),
+        kind,
+        title,
+        name,
+        status,
+        durationMs: nodeDurationMs,
+        input,
+        output,
+        startedAt: ev.createdAt.toISOString(),
+      });
+    }
+
+    if (rawNodes.length === 0) {
+      rawNodes.push({
+        id: "node-start",
+        seq: 1,
+        kind: "lifecycle",
+        title: "Início do Ciclo de Execução (Heartbeat)",
+        status: "success",
+        startedAt: run.startedAt?.toISOString() ?? new Date().toISOString(),
+      });
+
+      if (totalTokens > 0) {
+        rawNodes.push({
+          id: "node-llm",
+          seq: 2,
+          kind: "thought",
+          title: "Processamento do Agente & Modelo LLM",
+          status: run.status === "failed" ? "error" : "success",
+          durationMs: durationMs > 0 ? durationMs : undefined,
+          tokens: {
+            input: runCostEvents.reduce((a, b) => a + (b.inputTokens ?? 0), 0),
+            cached: runCostEvents.reduce((a, b) => a + (b.cachedInputTokens ?? 0), 0),
+            output: runCostEvents.reduce((a, b) => a + (b.outputTokens ?? 0), 0),
+          },
+          output: run.resultJson ?? "Processamento de inferência concluído",
+          startedAt: run.startedAt?.toISOString() ?? new Date().toISOString(),
+        });
+      }
+
+      if (run.stdoutExcerpt) {
+        rawNodes.push({
+          id: "node-stdout",
+          seq: 3,
+          kind: "tool_call",
+          title: "Execução de Processos / Ferramentas",
+          name: "runner_output",
+          status: "success",
+          output: run.stdoutExcerpt,
+          startedAt: run.startedAt?.toISOString() ?? new Date().toISOString(),
+        });
+      }
+
+      if (run.error || run.stderrExcerpt) {
+        rawNodes.push({
+          id: "node-error",
+          seq: 4,
+          kind: "error",
+          title: "Falha na Execução",
+          status: "error",
+          output: run.error || run.stderrExcerpt,
+          startedAt: run.finishedAt?.toISOString() ?? new Date().toISOString(),
+        });
+      }
+
+      rawNodes.push({
+        id: "node-end",
+        seq: 5,
+        kind: "lifecycle",
+        title: `Término da Execução (${run.status})`,
+        status: run.status === "failed" ? "error" : "success",
+        durationMs,
+        startedAt: run.finishedAt?.toISOString() ?? new Date().toISOString(),
+      });
+    }
+
+    // Build hierarchical call tree
+    const nodes: AgentTraceNode[] = [];
+    let currentParent: AgentTraceNode | null = null;
+    for (const node of rawNodes) {
+      if (node.kind === "lifecycle" && (node.title.startsWith("Fase:") || node.title.startsWith("Startup:"))) {
+        currentParent = { ...node, children: [] };
+        nodes.push(currentParent);
+      } else if (node.kind === "thought") {
+        const thoughtNode: AgentTraceNode = { ...node, children: [] };
+        if (currentParent && currentParent.children) {
+          currentParent.children.push(thoughtNode);
+        } else {
+          nodes.push(thoughtNode);
+        }
+        currentParent = thoughtNode;
+      } else if (node.kind === "tool_call" || node.kind === "subagent") {
+        if (currentParent && currentParent.children) {
+          currentParent.children.push(node);
+        } else {
+          nodes.push(node);
+        }
+      } else {
+        if (currentParent && currentParent.children && (node.kind === "error" || node.kind === "message")) {
+          currentParent.children.push(node);
+        } else {
+          currentParent = null;
+          nodes.push(node);
+        }
+      }
+    }
+
+    const trace: AgentRunTrace = {
+      runId: run.id,
+      agentId: run.agentId,
+      agentName: run.agentName ?? "Agent",
+      issueId: run.issueId ?? null,
+      issueTitle: run.issueTitle ?? null,
+      companyPrefix: run.companyPrefix ?? null,
+      status: run.status,
+      startedAt: run.startedAt?.toISOString() ?? new Date().toISOString(),
+      finishedAt: run.finishedAt?.toISOString() ?? null,
+      durationMs,
+      totalTokens,
+      simulatedCostCents,
+      nodes: nodes.length > 0 ? nodes : rawNodes,
+    };
+
+    res.json(trace);
   });
 
   return router;

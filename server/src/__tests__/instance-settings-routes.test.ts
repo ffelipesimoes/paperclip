@@ -54,9 +54,11 @@ function createMockSelectChain(result: unknown = []) {
   const chain: any = {
     from: vi.fn().mockReturnThis(),
     innerJoin: vi.fn().mockReturnThis(),
+    leftJoin: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
     groupBy: vi.fn().mockReturnThis(),
     orderBy: vi.fn().mockReturnThis(),
+    limit: vi.fn().mockReturnThis(),
     then: (resolve: any, reject?: any) => Promise.resolve(result).then(resolve, reject),
   };
   return chain;
@@ -1458,6 +1460,8 @@ describe("instance settings routes", () => {
       expect(res.body.timeline[0].outputTokens).toBe(2000);
       expect(res.body.costlyTasks).toHaveLength(1);
       expect(res.body.costlyTasks[0].issueId).toBe("issue-1");
+      expect(res.body.tasks).toHaveLength(1);
+      expect(res.body.tasks[0].issueId).toBe("issue-1");
       expect(res.body.cacheHitRate).toBeDefined();
       expect(res.body.simulatedCacheSavingsCents).toBeDefined();
     });
@@ -1485,6 +1489,120 @@ describe("instance settings routes", () => {
       const res = await request(app).get("/api/instance/observability");
       expect(res.status).toBe(200);
       expect(res.body.totalCompanies).toBe(1);
+    });
+  });
+
+  describe("GET /instance/observability/runs/:runId/trace", () => {
+    const adminActor = {
+      type: "board" as const,
+      source: "session" as const,
+      isInstanceAdmin: true,
+      userId: "user-admin",
+    };
+    const nonAdminActor = {
+      type: "board" as const,
+      source: "session" as const,
+      isInstanceAdmin: false,
+      userId: "user-non-admin",
+    };
+
+    it("rejects non-admin board actors with 403", async () => {
+      const app = await createApp(nonAdminActor);
+      const res = await request(app).get("/api/instance/observability/runs/run-1/trace");
+      expect(res.status).toBe(403);
+    });
+
+    it("returns 404 when run is not found", async () => {
+      mockDb.select.mockImplementation(() => createMockSelectChain([]));
+      const app = await createApp(adminActor);
+      const res = await request(app).get("/api/instance/observability/runs/run-missing/trace");
+      expect(res.status).toBe(404);
+      expect(res.body.error).toBe("Run not found");
+    });
+
+    it("returns trace tree with nodes when run and events exist", async () => {
+      const now = new Date();
+      const mockRun = {
+        id: "run-1",
+        agentId: "agent-1",
+        agentName: "Agent 1",
+        companyId: "comp-1",
+        companyPrefix: "COMP",
+        issueId: "issue-1",
+        issueTitle: "Task 1",
+        status: "succeeded",
+        startedAt: now,
+        finishedAt: new Date(now.getTime() + 15000),
+        error: null,
+        stdoutExcerpt: null,
+        stderrExcerpt: null,
+        usageJson: null,
+        resultJson: null,
+      };
+
+      const mockEvents = [
+        {
+          id: 1,
+          seq: 1,
+          eventType: "lifecycle",
+          message: "Startup",
+          payload: { step: "sync", durationMs: 120 },
+          createdAt: now,
+        },
+        {
+          id: 2,
+          seq: 2,
+          eventType: "thought",
+          message: "Thinking about approach",
+          payload: { thought: "Searching codebase files" },
+          createdAt: now,
+        },
+        {
+          id: 3,
+          seq: 3,
+          eventType: "tool_use",
+          message: "grep_search",
+          payload: { toolName: "grep_search", input: { query: "export" }, durationMs: 450 },
+          createdAt: now,
+        },
+        {
+          id: 4,
+          seq: 4,
+          eventType: "assistant.message",
+          message: "Done with task",
+          payload: { content: "Execution completed successfully" },
+          createdAt: now,
+        },
+      ];
+
+      const mockRunCosts = [
+        {
+          heartbeatRunId: "run-1",
+          model: "claude-3-5-sonnet",
+          provider: "anthropic",
+          inputTokens: 1000,
+          cachedInputTokens: 500,
+          outputTokens: 200,
+          costCents: 5,
+        },
+      ];
+
+      let selectCallIndex = 0;
+      mockDb.select.mockImplementation(() => {
+        const calls = [[mockRun], mockEvents, mockRunCosts];
+        const data = calls[selectCallIndex++] ?? [];
+        return createMockSelectChain(data);
+      });
+
+      const app = await createApp(adminActor);
+      const res = await request(app).get("/api/instance/observability/runs/run-1/trace");
+      expect(res.status).toBe(200);
+      expect(res.body.runId).toBe("run-1");
+      expect(res.body.agentName).toBe("Agent 1");
+      expect(res.body.issueTitle).toBe("Task 1");
+      expect(res.body.totalTokens).toBe(1700);
+      expect(res.body.nodes).toBeDefined();
+      expect(res.body.nodes.length).toBeGreaterThan(0);
     });
   });
 });
