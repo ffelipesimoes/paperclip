@@ -320,4 +320,19 @@ export interface InstanceObservabilitySummary {
   tasks: TaskCostDetail[];
   agents: AgentComputeUsage[];
   companies: CompanyComputeUsage[];
+  forecast?: ComputeForecast;
+}
+
+export interface ComputeForecast {
+  dailyBurnTokens: number;
+  dailyBurnCostCents: number;
+  projectedMonthEndTokens: number;
+  projectedMonthEndCostCents: number;
+  projectedBudgetUtilizationPercent?: number | null;
+  daysRemainingInMonth: number;
+  budgetMonthlyCents?: number | null;
+  budgetStatus: "within_budget" | "exceeding_budget" | "no_budget";
+  daysUntilBudgetExhausted?: number | null;
+  currentMtdTokens: number;
+  currentMtdCostCents: number;
 }

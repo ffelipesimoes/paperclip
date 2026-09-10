@@ -1233,6 +1233,7 @@ export type {
   AgentTraceNode,
   AgentRunTrace,
   TaskCostDetail,
+  ComputeForecast,
   FinanceEvent,
   FinanceSummary,
   FinanceByBiller,

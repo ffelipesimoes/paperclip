@@ -1465,6 +1465,10 @@ describe("instance settings routes", () => {
       expect(res.body.selectedCompanyId).toBe("all");
       expect(res.body.cacheHitRate).toBeDefined();
       expect(res.body.simulatedCacheSavingsCents).toBeDefined();
+      expect(res.body.forecast).toBeDefined();
+      expect(res.body.forecast.dailyBurnTokens).toBeGreaterThanOrEqual(0);
+      expect(res.body.forecast.projectedMonthEndTokens).toBeGreaterThanOrEqual(0);
+      expect(res.body.forecast.daysRemainingInMonth).toBeGreaterThanOrEqual(0);
     });
 
     it("supports scoping observability metrics by companyId", async () => {
@@ -1566,6 +1570,109 @@ describe("instance settings routes", () => {
       expect(res.status).toBe(200);
       expect(res.body.totalCompanies).toBe(1);
       expect(res.body.selectedCompanyId).toBe("all");
+    });
+
+    it("computes burn rate and end-of-month forecast with budget tracking", async () => {
+      const now = new Date();
+      const mockCompanies = [
+        { id: "comp-1", name: "Company 1", status: "active", budgetMonthlyCents: 50000, createdAt: now },
+      ];
+      const mockAgents = [
+        { companyId: "comp-1", agentCount: 1, activeAgentCount: 1 },
+      ];
+      const mockIssues = [
+        { companyId: "comp-1", count: 1 },
+      ];
+      const mockRuns = [
+        { companyId: "comp-1", runCount: 5, activeRunCount: 0, runtimeMs: 10000 },
+      ];
+      const mockCosts = [
+        {
+          companyId: "comp-1",
+          model: "claude-3-5-sonnet",
+          provider: "anthropic",
+          billingType: "metered_api",
+          costCents: 2000,
+          inputTokens: 100000,
+          cachedInputTokens: 0,
+          outputTokens: 20000,
+          subscriptionRunCount: 0,
+        },
+      ];
+      const mockAgentList = [
+        {
+          id: "agent-1",
+          name: "Agent 1",
+          role: "general",
+          status: "active",
+          companyId: "comp-1",
+          companyName: "Company 1",
+          companyPrefix: "COMP",
+        },
+      ];
+      const mockAgentRuns = [
+        { agentId: "agent-1", runCount: 5, activeRunCount: 0, runtimeMs: 10000 },
+      ];
+      const mockAgentCosts = [
+        {
+          agentId: "agent-1",
+          model: "claude-3-5-sonnet",
+          provider: "anthropic",
+          costCents: 2000,
+          inputTokens: 100000,
+          cachedInputTokens: 0,
+          outputTokens: 20000,
+        },
+      ];
+      const currentMonthPrefix = now.toISOString().slice(0, 7);
+      const mockTimelineCostRows = [
+        {
+          bucket: `${currentMonthPrefix}-01`,
+          model: "claude-3-5-sonnet",
+          provider: "anthropic",
+          costCents: 2000,
+          inputTokens: 100000,
+          cachedInputTokens: 0,
+          outputTokens: 20000,
+        },
+      ];
+      const mockTimelineRunRows = [
+        {
+          bucket: `${currentMonthPrefix}-01`,
+          runCount: 5,
+          runtimeMs: 10000,
+        },
+      ];
+      const mockCostlyTaskRows: unknown[] = [];
+
+      let selectCallIndex = 0;
+      mockDb.select.mockImplementation(() => {
+        const calls = [
+          mockCompanies,
+          mockAgents,
+          mockIssues,
+          mockRuns,
+          mockCosts,
+          mockAgentList,
+          mockAgentRuns,
+          mockAgentCosts,
+          mockTimelineCostRows,
+          mockTimelineRunRows,
+          mockCostlyTaskRows,
+        ];
+        const data = calls[selectCallIndex++] ?? [];
+        return createMockSelectChain(data);
+      });
+
+      const app = await createApp(adminActor);
+      const res = await request(app).get("/api/instance/observability");
+      expect(res.status).toBe(200);
+      expect(res.body.forecast).toBeDefined();
+      expect(res.body.forecast.dailyBurnTokens).toBe(120000);
+      expect(res.body.forecast.budgetMonthlyCents).toBe(50000);
+      expect(res.body.forecast.budgetStatus).toBeDefined();
+      expect(res.body.forecast.projectedMonthEndTokens).toBeGreaterThan(0);
+      expect(res.body.forecast.daysRemainingInMonth).toBeGreaterThanOrEqual(0);
     });
   });
 
