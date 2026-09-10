@@ -197,6 +197,7 @@ export interface ComputeTimelinePoint {
   outputTokens: number;
   costCents: number;
   simulatedCostCents: number;
+  simulatedCacheSavingsCents?: number;
 }
 
 export interface CostlyTask {

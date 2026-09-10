@@ -721,18 +721,33 @@ function ComputeTimelineCard({
             </div>
 
             {metric === "tokens" && (
-              <div className="flex flex-wrap items-center justify-center gap-4 text-xs pt-1 text-muted-foreground">
-                <div className="flex items-center gap-1.5">
-                  <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                  <span>Prompt Cache</span>
+              <div className="space-y-2.5 pt-1">
+                <div className="flex flex-wrap items-center justify-center gap-4 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-1.5" title="Tokens reaproveitados do contexto anterior sem reprocessamento. Têm ~90% de desconto na API ou custo zero em planos de assinatura.">
+                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                    <span className="font-medium text-foreground">Prompt Cache</span>
+                    <span className="text-(length:--text-micro) text-muted-foreground">(Reutilizado · ~90% desc.)</span>
+                  </div>
+                  <div className="flex items-center gap-1.5" title="Tokens enviados no prompt pela primeira vez.">
+                    <span className="h-2.5 w-2.5 rounded-full bg-sky-500" />
+                    <span className="font-medium text-foreground">Entrada Padrão (Fresh Input)</span>
+                    <span className="text-(length:--text-micro) text-muted-foreground">(Novos tokens lidos)</span>
+                  </div>
+                  <div className="flex items-center gap-1.5" title="Tokens gerados na resposta do modelo.">
+                    <span className="h-2.5 w-2.5 rounded-full bg-purple-500" />
+                    <span className="font-medium text-foreground">Saída (Completion)</span>
+                    <span className="text-(length:--text-micro) text-muted-foreground">(Respostas geradas)</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="h-2.5 w-2.5 rounded-full bg-sky-500" />
-                  <span>Entrada Padrão (Fresh Input)</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="h-2.5 w-2.5 rounded-full bg-purple-500" />
-                  <span>Saída (Completion)</span>
+
+                <div className="rounded-lg border border-border/60 bg-muted/30 p-2.5 text-xs text-muted-foreground flex items-start gap-2">
+                  <Info className="h-4 w-4 shrink-0 mt-0.5 text-sky-500" />
+                  <div className="space-y-0.5 leading-relaxed">
+                    <p>
+                      <strong className="text-foreground">Como interpretar os tokens e a cobrança de Cache:</strong>{" "}
+                      A barra verde indica tokens de conversas ou tarefas anteriores reutilizados da memória do modelo. Em <strong>APIs por consumo</strong>, eles são faturados com ~90% de desconto em relação aos novos tokens. Em <strong>planos por assinatura</strong> (como Claude Code ou Cursor), a fatura direta é <strong>$0.00</strong>, e o <em>Custo Simulado</em> calcula o investimento equivalente de mercado que você economizou aproveitando a assinatura e o cache.
+                    </p>
+                  </div>
                 </div>
               </div>
             )}
@@ -763,7 +778,9 @@ function ComputeTimelineCard({
                       {formatCents(activePoint.simulatedCostCents)}
                     </div>
                     <span className="text-(length:--text-micro) text-muted-foreground block">
-                      Billed direto: {formatCents(activePoint.costCents)}
+                      {activePoint.costCents > 0
+                        ? `Billed direto: ${formatCents(activePoint.costCents)}`
+                        : "Billed direto: $0.00 (Plano por Assinatura)"}
                     </span>
                   </div>
 
@@ -773,7 +790,17 @@ function ComputeTimelineCard({
                       {formatTokens(activePoint.tokens)}
                     </div>
                     <span className="text-(length:--text-micro) text-muted-foreground block">
-                      {formatTokens(activePoint.cachedInputTokens ?? 0)} cached ({Math.round(((activePoint.cachedInputTokens ?? 0) / Math.max(1, activePoint.tokens)) * 100)}%)
+                      {formatTokens(activePoint.cachedInputTokens ?? 0)} cached ({Math.round(((activePoint.cachedInputTokens ?? 0) / Math.max(1, activePoint.tokens)) * 100)}% reuso)
+                    </span>
+                  </div>
+
+                  <div className="rounded border border-border/50 bg-muted/20 p-2 space-y-0.5">
+                    <span className="text-muted-foreground">Economia com Cache</span>
+                    <div className="font-mono text-sm font-semibold text-emerald-500">
+                      +{formatCents(activePoint.simulatedCacheSavingsCents ?? 0)} poupados
+                    </div>
+                    <span className="text-(length:--text-micro) text-muted-foreground block">
+                      Desconto de ~90% nos tokens lidos do cache
                     </span>
                   </div>
 
@@ -783,17 +810,7 @@ function ComputeTimelineCard({
                       {activePoint.runCount} runs
                     </div>
                     <span className="text-(length:--text-micro) text-muted-foreground block">
-                      Tempo: {formatRuntimeMs(activePoint.runtimeMs)}
-                    </span>
-                  </div>
-
-                  <div className="rounded border border-border/50 bg-muted/20 p-2 space-y-0.5">
-                    <span className="text-muted-foreground">Média por Execução</span>
-                    <div className="font-mono text-sm font-semibold text-foreground">
-                      {activePoint.runCount > 0 ? formatTokens(Math.round(activePoint.tokens / activePoint.runCount)) : "0"} tok
-                    </div>
-                    <span className="text-(length:--text-micro) text-muted-foreground block">
-                      {activePoint.runCount > 0 ? formatCents(Math.round(activePoint.simulatedCostCents / activePoint.runCount)) : "$0"}/run
+                      Tempo: {formatRuntimeMs(activePoint.runtimeMs)} · Média: {activePoint.runCount > 0 ? formatTokens(Math.round(activePoint.tokens / activePoint.runCount)) : "0"} tok
                     </span>
                   </div>
                 </div>
