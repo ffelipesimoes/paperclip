@@ -42,6 +42,13 @@ export interface DashboardSummary {
     monthSpendCents: number;
     monthBudgetCents: number;
     monthUtilizationPercent: number;
+    billedCostCents?: number;
+    simulatedCostCents?: number;
+    totalTokens?: number;
+    inputTokens?: number;
+    cachedInputTokens?: number;
+    outputTokens?: number;
+    isSubscriptionOnly?: boolean;
   };
   pendingApprovals: number;
   budgets: {

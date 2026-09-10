@@ -1,6 +1,7 @@
 import { and, eq, gte, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { agents, approvals, companies, costEvents, heartbeatRuns, issues } from "@paperclipai/db";
+import { simulateCostCents } from "@paperclipai/shared";
 import { notFound } from "../errors.js";
 import { budgetService } from "./budgets.js";
 import { visibleIssueCondition } from "./issue-visibility.js";
@@ -44,7 +45,7 @@ export function dashboardService(db: Db) {
         agentRows,
         taskRows,
         pendingApprovals,
-        [{ monthSpend }],
+        costRows,
         runActivityRaw,
         budgetOverview,
       ] = await Promise.all([
@@ -68,7 +69,13 @@ export function dashboardService(db: Db) {
 
         db
           .select({
-            monthSpend: sql<number>`coalesce(sum(${costEvents.costCents}), 0)::double precision`,
+            model: costEvents.model,
+            provider: costEvents.provider,
+            billingType: costEvents.billingType,
+            costCents: sql<number>`coalesce(sum(${costEvents.costCents}), 0)::double precision`,
+            inputTokens: sql<number>`coalesce(sum(${costEvents.inputTokens}), 0)::double precision`,
+            cachedInputTokens: sql<number>`coalesce(sum(${costEvents.cachedInputTokens}), 0)::double precision`,
+            outputTokens: sql<number>`coalesce(sum(${costEvents.outputTokens}), 0)::double precision`,
           })
           .from(costEvents)
           .where(
@@ -76,7 +83,8 @@ export function dashboardService(db: Db) {
               eq(costEvents.companyId, companyId),
               gte(costEvents.occurredAt, monthStart),
             ),
-          ),
+          )
+          .groupBy(costEvents.model, costEvents.provider, costEvents.billingType),
 
         db.execute(sql`
           WITH RECURSIVE recovered_runs(id) AS (
@@ -143,7 +151,59 @@ export function dashboardService(db: Db) {
         if (row.status !== "done" && row.status !== "cancelled") taskCounts.open += count;
       }
 
-      const monthSpendCents = Number(monthSpend);
+      let billedCostCents = 0;
+      let simulatedCostCents = 0;
+      let subscriptionSimulatedCostCents = 0;
+      let inputTokens = 0;
+      let cachedInputTokens = 0;
+      let outputTokens = 0;
+      let hasMetered = false;
+      let hasSubscription = false;
+
+      for (const row of costRows) {
+        const costC = Number(row.costCents ?? 0);
+        const inTok = Number(row.inputTokens ?? 0);
+        const cacheTok = Number(row.cachedInputTokens ?? 0);
+        const outTok = Number(row.outputTokens ?? 0);
+
+        billedCostCents += costC;
+        inputTokens += inTok;
+        cachedInputTokens += cacheTok;
+        outputTokens += outTok;
+
+        const simC = simulateCostCents({
+          model: row.model,
+          provider: row.provider,
+          inputTokens: inTok,
+          cachedInputTokens: cacheTok,
+          outputTokens: outTok,
+        });
+        simulatedCostCents += simC;
+
+        if (row.billingType === "metered_api") {
+          hasMetered = true;
+        } else {
+          hasSubscription = true;
+          subscriptionSimulatedCostCents += simC;
+        }
+      }
+
+      if (simulatedCostCents === 0 && (inputTokens > 0 || cachedInputTokens > 0 || outputTokens > 0)) {
+        simulatedCostCents = simulateCostCents({
+          inputTokens,
+          cachedInputTokens,
+          outputTokens,
+        });
+      }
+
+      const totalTokens = inputTokens + cachedInputTokens + outputTokens;
+      const isSubscriptionOnly = hasSubscription && !hasMetered && billedCostCents === 0;
+
+      const effectiveSpendCents = billedCostCents > 0
+        ? Math.round(billedCostCents + subscriptionSimulatedCostCents)
+        : Math.round(simulatedCostCents);
+
+      const monthSpendCents = effectiveSpendCents;
 
       const runActivity = new Map(
         runActivityDays.map((date) => [
@@ -203,6 +263,13 @@ export function dashboardService(db: Db) {
           monthSpendCents,
           monthBudgetCents: company.budgetMonthlyCents,
           monthUtilizationPercent: Number(utilization.toFixed(2)),
+          billedCostCents,
+          simulatedCostCents,
+          totalTokens,
+          inputTokens,
+          cachedInputTokens,
+          outputTokens,
+          isSubscriptionOnly,
         },
         pendingApprovals,
         budgets: {

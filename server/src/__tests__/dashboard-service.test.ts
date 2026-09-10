@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { agents, companies, createDb, heartbeatRuns } from "@paperclipai/db";
+import { agents, companies, costEvents, createDb, heartbeatRuns } from "@paperclipai/db";
 import {
   getEmbeddedPostgresTestSupport,
   startEmbeddedPostgresTestDatabase,
@@ -47,6 +47,7 @@ describeEmbeddedPostgres("dashboard service", () => {
   }, 20_000);
 
   afterEach(async () => {
+    await db.delete(costEvents);
     await db.delete(heartbeatRuns);
     await db.delete(agents);
     await db.delete(companies);
@@ -236,5 +237,58 @@ describeEmbeddedPostgres("dashboard service", () => {
     });
     // process_lost kills that recovered must not leak into the failed breakdown.
     expect(bucket?.failedByErrorCode.process_lost).toBeUndefined();
+  });
+
+  it("quantifies token costs when billingType is subscription or costCents is zero", async () => {
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+    const today = utcDay(0);
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Subscription Co",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+      budgetMonthlyCents: 10000,
+    });
+
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "ClaudeSubAgent",
+      role: "general",
+      status: "idle",
+      adapterType: "claude_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+
+    await db.insert(costEvents).values([
+      {
+        id: randomUUID(),
+        companyId,
+        agentId,
+        model: "claude-3-7-sonnet",
+        provider: "anthropic",
+        billingType: "subscription_included",
+        costCents: 0,
+        inputTokens: 1_000_000,
+        cachedInputTokens: 0,
+        outputTokens: 100_000,
+        occurredAt: today,
+      },
+    ]);
+
+    const summary = await dashboardService(db).summary(companyId);
+
+    // 1M input @ $3/M = $3.00, 100k output @ $15/M = $1.50 -> Total $4.50 = 450 cents
+    expect(summary.costs.billedCostCents).toBe(0);
+    expect(summary.costs.simulatedCostCents).toBe(450);
+    expect(summary.costs.monthSpendCents).toBe(450);
+    expect(summary.costs.totalTokens).toBe(1_100_000);
+    expect(summary.costs.isSubscriptionOnly).toBe(true);
+    // 450 cents out of 10000 budget = 4.5%
+    expect(summary.costs.monthUtilizationPercent).toBe(4.5);
   });
 });
