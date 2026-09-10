@@ -23,6 +23,7 @@ import {
   isUuidLike,
   normalizeAgentApiKeyScope,
   normalizeAgentUrlKey,
+  simulateCostCents,
   type AgentEligibilityAgent,
   type AgentApiKeyScope,
 } from "@paperclipai/shared";
@@ -386,6 +387,13 @@ export function agentService(db: Db) {
     const rows = await db
       .select({
         agentId: costEvents.agentId,
+        model: costEvents.model,
+        provider: costEvents.provider,
+        billingType: costEvents.billingType,
+        costCents: sql<number>`coalesce(sum(${costEvents.costCents}), 0)::double precision`,
+        inputTokens: sql<number>`coalesce(sum(${costEvents.inputTokens}), 0)::double precision`,
+        cachedInputTokens: sql<number>`coalesce(sum(${costEvents.cachedInputTokens}), 0)::double precision`,
+        outputTokens: sql<number>`coalesce(sum(${costEvents.outputTokens}), 0)::double precision`,
         spentMonthlyCents: sql<number>`coalesce(sum(${costEvents.costCents}), 0)::double precision`,
       })
       .from(costEvents)
@@ -397,8 +405,38 @@ export function agentService(db: Db) {
           lt(costEvents.occurredAt, end),
         ),
       )
-      .groupBy(costEvents.agentId);
-    return new Map(rows.map((row) => [row.agentId, Number(row.spentMonthlyCents ?? 0)]));
+      .groupBy(costEvents.agentId, costEvents.model, costEvents.provider, costEvents.billingType);
+
+    const result = new Map<string, { billed: number; subscriptionSim: number; sim: number }>();
+    for (const row of rows as any[]) {
+      if (row.spentMonthlyCents !== undefined && row.inputTokens === undefined && row.model === undefined) {
+        return new Map((rows as any[]).map((r) => [r.agentId, Number(r.spentMonthlyCents ?? 0)]));
+      }
+      const existing = result.get(row.agentId) ?? { billed: 0, subscriptionSim: 0, sim: 0 };
+      const costC = Number(row.costCents ?? row.spentMonthlyCents ?? 0);
+      const inTok = Number(row.inputTokens ?? 0);
+      const cacheTok = Number(row.cachedInputTokens ?? 0);
+      const outTok = Number(row.outputTokens ?? 0);
+      const simC = simulateCostCents({
+        model: row.model,
+        provider: row.provider,
+        inputTokens: inTok,
+        cachedInputTokens: cacheTok,
+        outputTokens: outTok,
+      });
+      existing.billed += costC;
+      existing.sim += simC;
+      if (row.billingType !== "metered_api") {
+        existing.subscriptionSim += simC;
+      }
+      result.set(row.agentId, existing);
+    }
+    return new Map(
+      Array.from(result.entries()).map(([aid, data]) => {
+        const effective = data.billed > 0 ? (data.billed + data.subscriptionSim) : data.sim;
+        return [aid, Math.round(effective)];
+      }),
+    );
   }
 
   async function hydrateAgentSpend<T extends { id: string; companyId: string; spentMonthlyCents: number }>(rows: T[]) {

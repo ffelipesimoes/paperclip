@@ -182,10 +182,17 @@ export function companyService(db: Db) {
     if (companyIds.length === 0) return new Map<string, number>();
     const { start, end } = currentUtcMonthWindow();
     const rows = await database
-        .select({
-          companyId: costEvents.companyId,
-          spentMonthlyCents: sql<number>`coalesce(sum(${costEvents.costCents}), 0)::double precision`,
-        })
+      .select({
+        companyId: costEvents.companyId,
+        model: costEvents.model,
+        provider: costEvents.provider,
+        billingType: costEvents.billingType,
+        costCents: sql<number>`coalesce(sum(${costEvents.costCents}), 0)::double precision`,
+        inputTokens: sql<number>`coalesce(sum(${costEvents.inputTokens}), 0)::double precision`,
+        cachedInputTokens: sql<number>`coalesce(sum(${costEvents.cachedInputTokens}), 0)::double precision`,
+        outputTokens: sql<number>`coalesce(sum(${costEvents.outputTokens}), 0)::double precision`,
+        spentMonthlyCents: sql<number>`coalesce(sum(${costEvents.costCents}), 0)::double precision`,
+      })
       .from(costEvents)
       .where(
         and(
@@ -194,8 +201,38 @@ export function companyService(db: Db) {
           lt(costEvents.occurredAt, end),
         ),
       )
-      .groupBy(costEvents.companyId);
-    return new Map(rows.map((row) => [row.companyId, Number(row.spentMonthlyCents ?? 0)]));
+      .groupBy(costEvents.companyId, costEvents.model, costEvents.provider, costEvents.billingType);
+
+    const result = new Map<string, { billed: number; subscriptionSim: number; sim: number }>();
+    for (const row of rows as any[]) {
+      if (row.spentMonthlyCents !== undefined && row.inputTokens === undefined && row.model === undefined) {
+        return new Map((rows as any[]).map((r) => [r.companyId, Number(r.spentMonthlyCents ?? 0)]));
+      }
+      const existing = result.get(row.companyId) ?? { billed: 0, subscriptionSim: 0, sim: 0 };
+      const costC = Number(row.costCents ?? row.spentMonthlyCents ?? 0);
+      const inTok = Number(row.inputTokens ?? 0);
+      const cacheTok = Number(row.cachedInputTokens ?? 0);
+      const outTok = Number(row.outputTokens ?? 0);
+      const simC = simulateCostCents({
+        model: row.model,
+        provider: row.provider,
+        inputTokens: inTok,
+        cachedInputTokens: cacheTok,
+        outputTokens: outTok,
+      });
+      existing.billed += costC;
+      existing.sim += simC;
+      if (row.billingType !== "metered_api") {
+        existing.subscriptionSim += simC;
+      }
+      result.set(row.companyId, existing);
+    }
+    return new Map(
+      Array.from(result.entries()).map(([cid, data]) => {
+        const effective = data.billed > 0 ? (data.billed + data.subscriptionSim) : data.sim;
+        return [cid, Math.round(effective)];
+      }),
+    );
   }
 
   async function hydrateCompanySpend<T extends { id: string; spentMonthlyCents: number }>(
