@@ -22,6 +22,7 @@ import {
   type AgentRunTrace,
   type AgentTraceNode,
   type CompanyComputeUsage,
+  type ComputeForecast,
   type ComputeTimelinePoint,
   type CostlyTask,
   type HostComputeResources,
@@ -486,6 +487,7 @@ export function instanceSettingsRoutes(db: Db) {
           name: companies.name,
           issuePrefix: companies.issuePrefix,
           status: companies.status,
+          budgetMonthlyCents: companies.budgetMonthlyCents,
           createdAt: companies.createdAt,
         })
         .from(companies)
@@ -1028,6 +1030,93 @@ export function instanceSettingsRoutes(db: Db) {
       diskUsedBytes,
     };
 
+    // Compute Forecast & Burn Rate (FinOps Projections)
+    const now = new Date();
+    const daysInMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
+    const currentDayOfMonth = now.getUTCDate();
+    const daysRemainingInMonth = Math.max(0, daysInMonth - currentDayOfMonth);
+    const currentMonthPrefix = now.toISOString().slice(0, 7);
+
+    // MTD metrics from timeline or fallback to scoped totals
+    const mtdPoints = timeline.filter((p) => p.bucket.startsWith(currentMonthPrefix));
+    let currentMtdTokens: number;
+    let currentMtdCostCents: number;
+
+    if (mtdPoints.length > 0) {
+      currentMtdTokens = mtdPoints.reduce((acc, p) => acc + p.tokens, 0);
+      currentMtdCostCents = mtdPoints.reduce((acc, p) => acc + p.simulatedCostCents, 0);
+    } else {
+      currentMtdTokens = totalTokens;
+      currentMtdCostCents = simulatedCostCents;
+    }
+
+    // Daily Burn Rate calculation
+    const activePoints = timeline.filter((p) => p.tokens > 0);
+    let dailyBurnTokens = 0;
+    let dailyBurnCostCents = 0;
+
+    if (windowParam === "24h") {
+      const sumTokens = activePoints.reduce((acc, p) => acc + p.tokens, 0);
+      const sumCost = activePoints.reduce((acc, p) => acc + p.simulatedCostCents, 0);
+      const hoursCount = Math.max(1, activePoints.length);
+      dailyBurnTokens = Math.round((sumTokens / hoursCount) * 24);
+      dailyBurnCostCents = Math.round((sumCost / hoursCount) * 24);
+    } else if (activePoints.length > 0) {
+      const recentPoints = activePoints.slice(-7);
+      const sumTokens = recentPoints.reduce((acc, p) => acc + p.tokens, 0);
+      const sumCost = recentPoints.reduce((acc, p) => acc + p.simulatedCostCents, 0);
+      dailyBurnTokens = Math.round(sumTokens / recentPoints.length);
+      dailyBurnCostCents = Math.round(sumCost / recentPoints.length);
+    } else if (currentDayOfMonth > 0 && currentMtdTokens > 0) {
+      dailyBurnTokens = Math.round(currentMtdTokens / currentDayOfMonth);
+      dailyBurnCostCents = Math.round(currentMtdCostCents / currentDayOfMonth);
+    }
+
+    const projectedMonthEndTokens = currentMtdTokens + (daysRemainingInMonth * dailyBurnTokens);
+    const projectedMonthEndCostCents = currentMtdCostCents + (daysRemainingInMonth * dailyBurnCostCents);
+
+    // Budget evaluation
+    let targetBudgetCents = 0;
+    if (companyIdParam) {
+      const targetCompanyRecord = allCompanies.find((c) => c.id === companyIdParam);
+      targetBudgetCents = Number(targetCompanyRecord?.budgetMonthlyCents ?? 0);
+    } else {
+      targetBudgetCents = allCompanies.reduce((acc, c) => acc + Number(c.budgetMonthlyCents ?? 0), 0);
+    }
+
+    let budgetStatus: "within_budget" | "exceeding_budget" | "no_budget" = "no_budget";
+    let projectedBudgetUtilizationPercent: number | null = null;
+    let daysUntilBudgetExhausted: number | null = null;
+
+    if (targetBudgetCents > 0) {
+      projectedBudgetUtilizationPercent = Math.round((projectedMonthEndCostCents / targetBudgetCents) * 1000) / 10;
+      if (projectedMonthEndCostCents > targetBudgetCents) {
+        budgetStatus = "exceeding_budget";
+        const remainingBudgetCents = Math.max(0, targetBudgetCents - currentMtdCostCents);
+        if (dailyBurnCostCents > 0) {
+          daysUntilBudgetExhausted = Math.max(0, Math.floor(remainingBudgetCents / dailyBurnCostCents));
+        } else {
+          daysUntilBudgetExhausted = 0;
+        }
+      } else {
+        budgetStatus = "within_budget";
+      }
+    }
+
+    const forecast: ComputeForecast = {
+      dailyBurnTokens,
+      dailyBurnCostCents,
+      projectedMonthEndTokens,
+      projectedMonthEndCostCents,
+      projectedBudgetUtilizationPercent,
+      daysRemainingInMonth,
+      budgetMonthlyCents: targetBudgetCents > 0 ? targetBudgetCents : null,
+      budgetStatus,
+      daysUntilBudgetExhausted,
+      currentMtdTokens,
+      currentMtdCostCents,
+    };
+
     const summary: InstanceObservabilitySummary = {
       window: windowParam,
       selectedCompanyId: companyIdParam ?? "all",
@@ -1054,6 +1143,7 @@ export function instanceSettingsRoutes(db: Db) {
       host,
       models: modelList,
       timeline,
+      forecast,
       costlyTasks,
       tasks: allTasks,
       agents: agentList,

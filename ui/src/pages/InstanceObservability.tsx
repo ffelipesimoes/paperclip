@@ -17,17 +17,20 @@ import {
   Flame,
   GitFork,
   HardDrive,
+  AlertTriangle,
   Info,
   PieChart,
   Search,
   Server,
   ShieldAlert,
   Sparkles,
+  TrendingUp,
   Zap,
 } from "lucide-react";
 import type {
   InstanceObservabilitySummary,
   CompanyComputeUsage,
+  ComputeForecast,
   ModelComputeUsage,
   ComputeTimelinePoint,
   CostlyTask,
@@ -115,6 +118,19 @@ function exportObservabilityCsv(
   rows.push(`Estimated Cache Savings ($),${((data.simulatedCacheSavingsCents ?? 0) / 100).toFixed(2)}`);
   rows.push(`Simulated Model Cost ($),${((data.simulatedCostCents ?? 0) / 100).toFixed(2)}`);
   rows.push(`Actual Billed Spend ($),${((data.billedCostCents ?? 0) / 100).toFixed(2)}`);
+  if (data.forecast) {
+    rows.push("");
+    rows.push("=== FINOPS FORECAST & BURN RATE ===");
+    rows.push(`Daily Burn Tokens,${data.forecast.dailyBurnTokens}`);
+    rows.push(`Daily Burn Cost ($),${((data.forecast.dailyBurnCostCents ?? 0) / 100).toFixed(2)}`);
+    rows.push(`Projected Month-End Tokens,${data.forecast.projectedMonthEndTokens}`);
+    rows.push(`Projected Month-End Cost ($),${((data.forecast.projectedMonthEndCostCents ?? 0) / 100).toFixed(2)}`);
+    rows.push(`Days Remaining in Month,${data.forecast.daysRemainingInMonth}`);
+    rows.push(`Budget Monthly ($),${data.forecast.budgetMonthlyCents ? (data.forecast.budgetMonthlyCents / 100).toFixed(2) : "N/A"}`);
+    rows.push(`Budget Status,${data.forecast.budgetStatus}`);
+    rows.push(`Projected Budget Utilization (%),${data.forecast.projectedBudgetUtilizationPercent ?? "N/A"}%`);
+    rows.push(`Days Until Budget Exhausted,${data.forecast.daysUntilBudgetExhausted ?? "N/A"}`);
+  }
   rows.push("");
 
   // Section 2: Organizations
@@ -512,11 +528,168 @@ function CostlyTasksCard({
   );
 }
 
+function ComputeForecastCard({
+  forecast,
+}: {
+  forecast?: ComputeForecast;
+}) {
+  if (!forecast) return null;
+
+  const hasBudget = Boolean(forecast.budgetMonthlyCents && forecast.budgetMonthlyCents > 0);
+  const mtdSpentPercent = hasBudget && forecast.budgetMonthlyCents
+    ? Math.min(100, Math.round((forecast.currentMtdCostCents / forecast.budgetMonthlyCents) * 100))
+    : 0;
+  const isExceeding = forecast.budgetStatus === "exceeding_budget";
+
+  return (
+    <Card className="overflow-hidden border-border bg-card">
+      <CardHeader className="px-5 pt-5 pb-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-2">
+              <TrendingUp className="h-4 w-4 text-primary" />
+              <CardTitle className="text-base">Previsão & FinOps Runway (Token & Cost Forecast)</CardTitle>
+            </div>
+            <CardDescription>
+              Projeção de encerramento do ciclo mensal (UTC) estimada pelo ritmo de consumo recente (burn rate).
+            </CardDescription>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline" className="font-mono text-xs">
+              📅 {forecast.daysRemainingInMonth} {forecast.daysRemainingInMonth === 1 ? "dia restante" : "dias restantes"} no ciclo
+            </Badge>
+            {forecast.budgetStatus === "exceeding_budget" ? (
+              <Badge variant="secondary" className="bg-destructive/10 text-destructive border-destructive/20 text-xs font-medium flex items-center gap-1">
+                <AlertTriangle className="h-3 w-3" />
+                <span>Risco de Estouro ({forecast.projectedBudgetUtilizationPercent}% do teto)</span>
+              </Badge>
+            ) : forecast.budgetStatus === "within_budget" ? (
+              <Badge variant="secondary" className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 text-xs font-medium flex items-center gap-1">
+                <Check className="h-3 w-3" />
+                <span>Dentro do Orçamento ({forecast.projectedBudgetUtilizationPercent}% do teto)</span>
+              </Badge>
+            ) : (
+              <Badge variant="secondary" className="bg-muted text-muted-foreground text-xs">
+                Sem teto orçamentário configurado
+              </Badge>
+            )}
+          </div>
+        </div>
+      </CardHeader>
+
+      <CardContent className="px-5 pb-5 pt-2 space-y-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-1">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>Tokens Projetados (Mês)</span>
+              <Coins className="h-3.5 w-3.5 text-sky-500" />
+            </div>
+            <div className="font-mono text-lg font-bold text-foreground">
+              {formatTokens(forecast.projectedMonthEndTokens)}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              MTD atual: <span className="font-mono text-foreground font-medium">{formatTokens(forecast.currentMtdTokens)}</span>
+              {forecast.daysRemainingInMonth > 0 && (
+                <span className="block text-(length:--text-micro) text-muted-foreground">
+                  +{formatTokens(forecast.dailyBurnTokens * forecast.daysRemainingInMonth)} até virar o mês
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-1">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>Custo Projetado (Mês)</span>
+              <Flame className="h-3.5 w-3.5 text-amber-500" />
+            </div>
+            <div className="font-mono text-lg font-bold text-amber-500">
+              {formatCents(forecast.projectedMonthEndCostCents)}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              MTD atual: <span className="font-mono text-foreground font-medium">{formatCents(forecast.currentMtdCostCents)}</span>
+              {forecast.daysRemainingInMonth > 0 && (
+                <span className="block text-(length:--text-micro) text-muted-foreground">
+                  +{formatCents(forecast.dailyBurnCostCents * forecast.daysRemainingInMonth)} projetados
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-1">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>Ritmo Diário (Burn Rate)</span>
+              <Zap className="h-3.5 w-3.5 text-purple-500" />
+            </div>
+            <div className="font-mono text-lg font-bold text-foreground">
+              {formatTokens(forecast.dailyBurnTokens)}
+              <span className="text-xs font-normal text-muted-foreground ml-1">/ dia</span>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Equivalente a <span className="font-mono text-foreground font-medium">~{formatCents(forecast.dailyBurnCostCents)}</span>/dia em valor de mercado
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-1">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>Teto & Runway</span>
+              <DollarSign className="h-3.5 w-3.5 text-emerald-500" />
+            </div>
+            <div className="font-mono text-lg font-bold text-foreground">
+              {hasBudget && forecast.budgetMonthlyCents ? formatCents(forecast.budgetMonthlyCents) : "Sem Teto"}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {isExceeding ? (
+                <span className="text-destructive font-medium">
+                  {forecast.daysUntilBudgetExhausted != null && forecast.daysUntilBudgetExhausted <= 0
+                    ? "Teto atingido ou excedido!"
+                    : `Esgota em ~${forecast.daysUntilBudgetExhausted} dias!`}
+                </span>
+              ) : hasBudget ? (
+                <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                  Margem: {forecast.projectedBudgetUtilizationPercent != null ? `${(100 - forecast.projectedBudgetUtilizationPercent).toFixed(1)}% livre` : "Segura"}
+                </span>
+              ) : (
+                <span>Sem limite mensal definido</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {hasBudget && forecast.budgetMonthlyCents && (
+          <div className="rounded-lg border border-border bg-muted/10 p-3 space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">Utilização do Orçamento Mensal</span>
+              <span className="font-mono font-medium text-foreground">
+                Consumido: {mtdSpentPercent}% · Projeção: {forecast.projectedBudgetUtilizationPercent ?? 0}%
+              </span>
+            </div>
+            <div className="h-2 w-full rounded-full bg-muted overflow-hidden flex">
+              <div
+                className={`h-full transition-all ${isExceeding ? "bg-destructive" : "bg-primary"}`}
+                style={{ width: `${Math.min(100, forecast.projectedBudgetUtilizationPercent ?? 0)}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-start gap-2 rounded-lg border border-border/60 bg-muted/20 p-2.5 text-xs text-muted-foreground">
+          <Info className="h-4 w-4 shrink-0 mt-0.5 text-primary" />
+          <p className="leading-relaxed">
+            <strong className="text-foreground">Inteligência Preditiva FinOps:</strong> O cálculo de queima diária utiliza a média dos períodos ativos recentes e a projeta linearmente sobre os dias remanescentes do mês civil. Em contas com planos de assinatura, a quantificação reflete a precificação oficial de mercado poupada pela infraestrutura interna.
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function ComputeTimelineCard({
   timeline,
+  forecast,
   window,
 }: {
   timeline?: ComputeTimelinePoint[];
+  forecast?: ComputeForecast;
   window: string;
 }) {
   const [metric, setMetric] = useState<"cost" | "tokens" | "runtime">("cost");
@@ -717,6 +890,33 @@ function ComputeTimelineCard({
                     </div>
                   );
                 })}
+                {forecast && forecast.daysRemainingInMonth > 0 && metric !== "runtime" && (
+                  <div
+                    key="forecast-projection"
+                    className="group relative flex-1 max-w-24 flex flex-col items-center justify-end h-full"
+                    title={`Ritmo Projetado: ${metric === "cost" ? formatCents(forecast.dailyBurnCostCents) : formatTokens(forecast.dailyBurnTokens)}/dia`}
+                  >
+                    <div className="mb-1.5 flex flex-col items-center">
+                      <span className="text-(length:--text-micro) font-semibold uppercase tracking-wider text-primary">
+                        Projeção
+                      </span>
+                      <span className="font-mono text-xs font-semibold text-primary whitespace-nowrap">
+                        {metric === "cost" ? formatCents(forecast.dailyBurnCostCents) : formatTokens(forecast.dailyBurnTokens)}
+                      </span>
+                    </div>
+
+                    <div
+                      className="w-full rounded-t-md transition-all relative overflow-hidden border-2 border-dashed border-primary/60 bg-primary/10 group-hover:bg-primary/20"
+                      style={{
+                        height: `${Math.max(6, Math.min(100, Math.round(((metric === "cost" ? forecast.dailyBurnCostCents : forecast.dailyBurnTokens) / maxVal) * 100)))}%`,
+                      }}
+                    />
+
+                    <span className="mt-2 text-xs font-mono text-primary font-medium">
+                      +1d méd.
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1372,7 +1572,9 @@ export function InstanceObservability() {
         <CostlyTasksCard tasks={data?.costlyTasks} onSelectRun={setSelectedRunId} />
       </div>
 
-      <ComputeTimelineCard timeline={data?.timeline} window={window} />
+      <ComputeForecastCard forecast={data?.forecast} />
+
+      <ComputeTimelineCard timeline={data?.timeline} forecast={data?.forecast} window={window} />
 
       <Card className="border-border bg-card">
         <CardContent className="p-4">
