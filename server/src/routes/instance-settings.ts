@@ -869,6 +869,7 @@ export function instanceSettingsRoutes(db: Db) {
           outputTokens: 0,
           costCents: 0,
           simulatedCostCents: 0,
+          simulatedCacheSavingsCents: 0,
         };
         timelineMap.set(row.bucket, point);
       }
@@ -887,6 +888,11 @@ export function instanceSettingsRoutes(db: Db) {
         cachedInputTokens: cacheTok,
         outputTokens: outTok,
       });
+      point.simulatedCacheSavingsCents = (point.simulatedCacheSavingsCents ?? 0) + simulateCacheSavingsCents({
+        model: row.model,
+        provider: row.provider,
+        cachedInputTokens: cacheTok,
+      });
     }
 
     for (const row of timelineRunRows) {
@@ -904,6 +910,7 @@ export function instanceSettingsRoutes(db: Db) {
           outputTokens: 0,
           costCents: 0,
           simulatedCostCents: 0,
+          simulatedCacheSavingsCents: 0,
         };
         timelineMap.set(row.bucket, point);
       }
