@@ -11140,6 +11140,30 @@ export function heartbeatService(
         issueId,
         comment: decision.comment,
       });
+      await db
+        .update(agents)
+        .set({
+          status: "paused",
+          pauseReason: "stalled_loop",
+          pausedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(agents.id, run.agentId));
+      await logActivity(db, {
+        companyId: run.companyId,
+        actorType: "system",
+        actorId: "system",
+        agentId: run.agentId,
+        runId: run.id,
+        action: "agent.paused",
+        entityType: "agent",
+        entityId: run.agentId,
+        details: {
+          reason: "stalled_loop",
+          livenessReason: run.livenessReason ?? "Run ended without concrete progress; continuation attempts exhausted",
+          issueId,
+        },
+      });
       return;
     }
 

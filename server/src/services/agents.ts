@@ -237,6 +237,9 @@ function normalizeRuntimeConfigForNewAgent(runtimeConfig: unknown): Record<strin
   if (parseFiniteNumberLike(heartbeat.maxConcurrentRuns) == null) {
     heartbeat.maxConcurrentRuns = AGENT_DEFAULT_MAX_CONCURRENT_RUNS;
   }
+  if (heartbeat.skipTimerWhenNoActionableWork === undefined) {
+    heartbeat.skipTimerWhenNoActionableWork = true;
+  }
   normalizedRuntimeConfig.heartbeat = heartbeat;
   return normalizedRuntimeConfig;
 }

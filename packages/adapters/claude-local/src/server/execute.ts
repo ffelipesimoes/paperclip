@@ -1,3 +1,4 @@
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -132,13 +133,43 @@ interface ClaudeRuntimeConfig {
   extraArgs: string[];
 }
 
+function normalizeFsPathForComparison(p: string): string {
+  const resolved = path.resolve(p);
+  try {
+    return fsSync.realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
 export function claudeSessionCwdMatchesExecutionTarget(input: {
   runtimeSessionCwd: string;
   effectiveExecutionCwd: string;
   executionTargetIsRemote: boolean;
 }): boolean {
   if (input.executionTargetIsRemote || input.runtimeSessionCwd.length === 0) return true;
-  return path.resolve(input.runtimeSessionCwd) === path.resolve(input.effectiveExecutionCwd);
+  if (path.resolve(input.runtimeSessionCwd) === path.resolve(input.effectiveExecutionCwd)) return true;
+  return normalizeFsPathForComparison(input.runtimeSessionCwd) === normalizeFsPathForComparison(input.effectiveExecutionCwd);
+}
+
+function normalizeMcpIdentityForComparison(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return JSON.stringify(
+        [...parsed]
+          .sort((a, b) => String(a?.name ?? "").localeCompare(String(b?.name ?? "")))
+          .map((s) => ({
+            connectionId: s?.connectionId ?? null,
+            name: String(s?.name ?? ""),
+            url: s?.url ?? null,
+          })),
+      );
+    }
+  } catch {
+    // fallback
+  }
+  return raw;
 }
 
 function buildLoginResult(input: {
@@ -628,7 +659,13 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   });
   const runtimeMcpServers = ctx.runtimeMcp?.getServers() ?? [];
   const runtimeMcpIdentity = JSON.stringify(
-    runtimeMcpServers.map(({ name, url, connectionId }) => ({ name, url, connectionId })),
+    [...runtimeMcpServers]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(({ name, url, connectionId }) => ({
+        connectionId: connectionId ?? null,
+        name,
+        url: url ?? null,
+      })),
   );
   const claudeRuntimeStateDir = resolveManagedClaudeRuntimeStateDir(
     process.env,
@@ -853,7 +890,8 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const hasMatchingMcpServers =
     runtimeMcpServerIdentity.length === 0
       ? runtimeMcpServers.length === 0
-      : runtimeMcpServerIdentity === runtimeMcpIdentity;
+      : runtimeMcpServerIdentity === runtimeMcpIdentity ||
+        normalizeMcpIdentityForComparison(runtimeMcpServerIdentity) === normalizeMcpIdentityForComparison(runtimeMcpIdentity);
   const isValidUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(runtimeSessionId);
   const canResumeSession =
     runtimeSessionId.length > 0 &&

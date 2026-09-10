@@ -2140,6 +2140,40 @@ describe("renderPaperclipWakePrompt", () => {
     );
   });
 
+  it("compresses long comment lists with Head/Tail omission note", () => {
+    const comments = Array.from({ length: 8 }, (_, i) => ({
+      id: `comment-${i + 1}`,
+      body: `Comment body number ${i + 1}`,
+      author: { type: "user", id: "user-1" },
+      createdAt: `2026-06-01T12:0${i}:00.000Z`,
+    }));
+
+    const prompt = renderPaperclipWakePrompt({
+      reason: "issue_commented",
+      issue: {
+        id: "issue-long-thread",
+        identifier: "PAP-999",
+        title: "Long comment thread",
+        status: "in_progress",
+      },
+      comments,
+      commentIds: comments.map((c) => c.id),
+      latestCommentId: "comment-8",
+      commentWindow: { requestedCount: 8, includedCount: 8, missingCount: 0 },
+      fallbackFetchNeeded: false,
+    });
+
+    expect(prompt).toContain("1. comment comment-1");
+    expect(prompt).toContain("2. comment comment-2");
+    expect(prompt).toContain("[... 4 intermediate comments omitted for token efficiency; fetch full thread if needed ...]");
+    expect(prompt).not.toContain("3. comment comment-3");
+    expect(prompt).not.toContain("4. comment comment-4");
+    expect(prompt).not.toContain("5. comment comment-5");
+    expect(prompt).not.toContain("6. comment comment-6");
+    expect(prompt).toContain("7. comment comment-7");
+    expect(prompt).toContain("8. comment comment-8");
+  });
+
   it("renders grouped non-plan document annotations with editing scope", () => {
     const prompt = renderPaperclipWakePrompt({
       reason: "issue_commented",
