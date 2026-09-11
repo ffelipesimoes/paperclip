@@ -35,6 +35,7 @@ import { useSidebar } from "../context/SidebarContext";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { useStreamlinedUiEnabled } from "../hooks/useStreamlinedUiEnabled";
 import { useCompanyPageMemory } from "../hooks/useCompanyPageMemory";
+import { useVisualViewport } from "../hooks/useVisualViewport";
 import { healthApi } from "../api/health";
 import { instanceSettingsApi } from "../api/instanceSettings";
 import { resolveArchivedCompanyBounce, shouldSyncCompanySelectionFromRoute } from "../lib/company-selection";
@@ -611,17 +612,33 @@ export function Layout() {
     }
   }, [location.key, location.pathname, location.state, navigationType]);
 
+  const {
+    height: visualViewportHeight,
+    offsetTop: visualViewportOffsetTop,
+    isConstrained: isViewportConstrained,
+  } = useVisualViewport();
+
+  const shellStyle = useMemo<CSSProperties | undefined>(() => {
+    if (isMobile) return undefined;
+    if (!isViewportConstrained || !visualViewportHeight) return undefined;
+    return {
+      height: `${visualViewportHeight}px`,
+      transform: visualViewportOffsetTop > 0 ? `translateY(${visualViewportOffsetTop}px)` : undefined,
+    };
+  }, [isMobile, isViewportConstrained, visualViewportHeight, visualViewportOffsetTop]);
+
   return (
     <GeneralSettingsProvider value={{ keyboardShortcutsEnabled }}>
       <div
-      className={cn(
-        "bg-background text-foreground pt-(--sz-safe-top)",
-        // overflow-x-clip on mobile keeps a stray wide descendant from making the
-        // whole viewport scroll horizontally. clip (not hidden) leaves overflow-y
-        // computed as visible, so native body scroll + the sticky breadcrumb keep
-        // working.
-        isMobile ? "min-h-dvh overflow-x-clip" : "flex h-dvh flex-col overflow-clip",
-      )}
+        style={shellStyle}
+        className={cn(
+          "bg-background text-foreground pt-(--sz-safe-top)",
+          // overflow-x-clip on mobile keeps a stray wide descendant from making the
+          // whole viewport scroll horizontally. clip (not hidden) leaves overflow-y
+          // computed as visible, so native body scroll + the sticky breadcrumb keep
+          // working.
+          isMobile ? "min-h-dvh overflow-x-clip" : "flex h-dvh flex-col overflow-clip",
+        )}
       >
       <a
         href="#main-content"

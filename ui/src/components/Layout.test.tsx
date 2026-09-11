@@ -1240,4 +1240,60 @@ describe("Layout", () => {
       root.unmount();
     });
   });
+
+  it("adjusts desktop shell height when visualViewport is constrained by a virtual keyboard", async () => {
+    mockSidebarState.isMobile = false;
+    const originalVv = Object.getOwnPropertyDescriptor(window, "visualViewport");
+    const originalInnerHeight = window.innerHeight;
+
+    const visualViewport = new EventTarget() as EventTarget & {
+      height: number;
+      width: number;
+      offsetTop: number;
+      offsetLeft: number;
+    };
+    visualViewport.height = 1024;
+    visualViewport.width = 1366;
+    visualViewport.offsetTop = 0;
+    visualViewport.offsetLeft = 0;
+
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: visualViewport,
+    });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 1024 });
+
+    const { root, rootEl } = await renderLayoutRoot();
+
+    expect(rootEl.style.height).toBe("");
+
+    // Simulate iPad software keyboard appearing (height shrinks to 624px)
+    await act(async () => {
+      visualViewport.height = 624;
+      visualViewport.dispatchEvent(new Event("resize"));
+      await flushReact();
+    });
+
+    expect(rootEl.style.height).toBe("624px");
+
+    // Simulate software keyboard dismissed (height returns to 1024px)
+    await act(async () => {
+      visualViewport.height = 1024;
+      visualViewport.dispatchEvent(new Event("resize"));
+      await flushReact();
+    });
+
+    expect(rootEl.style.height).toBe("");
+
+    if (originalVv) {
+      Object.defineProperty(window, "visualViewport", originalVv);
+    } else {
+      Reflect.deleteProperty(window, "visualViewport");
+    }
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: originalInnerHeight });
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
 });
