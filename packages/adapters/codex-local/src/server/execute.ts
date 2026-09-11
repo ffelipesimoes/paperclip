@@ -1,3 +1,4 @@
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -126,6 +127,15 @@ function stripCodexRolloutNoise(text: string): string {
     kept.push(part);
   }
   return kept.join("\n");
+}
+
+function normalizeFsPathForComparison(p: string): string {
+  const resolved = path.resolve(p);
+  try {
+    return fsSync.realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
 }
 
 function firstNonEmptyLine(text: string): string {
@@ -1054,7 +1064,9 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     const runtimeRemoteExecution = parseObject(runtimeSessionParams.remoteExecution);
     const canResumeSession =
       runtimeSessionId.length > 0 &&
-      (runtimeSessionCwd.length === 0 || path.resolve(runtimeSessionCwd) === path.resolve(effectiveExecutionCwd)) &&
+      (runtimeSessionCwd.length === 0 ||
+        path.resolve(runtimeSessionCwd) === path.resolve(effectiveExecutionCwd) ||
+        normalizeFsPathForComparison(runtimeSessionCwd) === normalizeFsPathForComparison(effectiveExecutionCwd)) &&
       adapterExecutionTargetSessionMatches(runtimeRemoteExecution, runtimeExecutionTarget);
     const codexTransientFallbackMode = readCodexTransientFallbackMode(context);
     const forceSaferInvocation = fallbackModeUsesSaferInvocation(codexTransientFallbackMode);

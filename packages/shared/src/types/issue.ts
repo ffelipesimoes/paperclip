@@ -729,6 +729,8 @@ export interface IssueExecutionState {
   monitor?: IssueExecutionMonitorState | null;
   /** Consecutive agent-initiated changes-requested rounds on the current stage. */
   changesRequestedCount?: number;
+  /** Consolidated 2-3 sentence progress summary for long-running task token optimization. */
+  workingSummary?: string | null;
 }
 
 export interface IssueExecutionDecision {

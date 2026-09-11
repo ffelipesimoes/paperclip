@@ -2077,18 +2077,62 @@ export function renderPaperclipWakePrompt(
     lines.push("New comments in order:");
   }
 
-  for (const [index, comment] of normalized.comments.entries()) {
-    const authorLabel = comment.authorId
-      ? `${comment.authorType ?? "unknown"} ${comment.authorId}`
-      : comment.authorType ?? "unknown";
-    lines.push(
-      `${index + 1}. comment ${comment.id ?? "unknown"} at ${comment.createdAt ?? "unknown"} by ${authorLabel}`,
-      comment.body,
-    );
-    if (comment.bodyTruncated) {
-      lines.push("[comment body truncated]");
+  const MAX_EXPANDED_COMMENTS = 5;
+  const shouldCompressComments = normalized.comments.length > MAX_EXPANDED_COMMENTS;
+
+  if (!shouldCompressComments) {
+    for (const [index, comment] of normalized.comments.entries()) {
+      const authorLabel = comment.authorId
+        ? `${comment.authorType ?? "unknown"} ${comment.authorId}`
+        : comment.authorType ?? "unknown";
+      lines.push(
+        `${index + 1}. comment ${comment.id ?? "unknown"} at ${comment.createdAt ?? "unknown"} by ${authorLabel}`,
+        comment.body,
+      );
+      if (comment.bodyTruncated) {
+        lines.push("[comment body truncated]");
+      }
+      lines.push("");
     }
-    lines.push("");
+  } else {
+    const headComments = normalized.comments.slice(0, 2);
+    const tailComments = normalized.comments.slice(-2);
+    const omittedCount = normalized.comments.length - 4;
+
+    for (const [index, comment] of headComments.entries()) {
+      const authorLabel = comment.authorId
+        ? `${comment.authorType ?? "unknown"} ${comment.authorId}`
+        : comment.authorType ?? "unknown";
+      lines.push(
+        `${index + 1}. comment ${comment.id ?? "unknown"} at ${comment.createdAt ?? "unknown"} by ${authorLabel}`,
+        comment.body,
+      );
+      if (comment.bodyTruncated) {
+        lines.push("[comment body truncated]");
+      }
+      lines.push("");
+    }
+
+    lines.push(
+      `[... ${omittedCount} intermediate comments omitted for token efficiency; fetch full thread if needed ...]`,
+      "",
+    );
+
+    const tailStartIndex = normalized.comments.length - 2;
+    for (const [offset, comment] of tailComments.entries()) {
+      const index = tailStartIndex + offset;
+      const authorLabel = comment.authorId
+        ? `${comment.authorType ?? "unknown"} ${comment.authorId}`
+        : comment.authorType ?? "unknown";
+      lines.push(
+        `${index + 1}. comment ${comment.id ?? "unknown"} at ${comment.createdAt ?? "unknown"} by ${authorLabel}`,
+        comment.body,
+      );
+      if (comment.bodyTruncated) {
+        lines.push("[comment body truncated]");
+      }
+      lines.push("");
+    }
   }
 
   if (normalized.questionResponse) {
