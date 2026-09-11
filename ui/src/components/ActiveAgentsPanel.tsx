@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState } from "react";
 import { Link } from "@/lib/router";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import type { Issue, IssueRecoveryAction } from "@paperclipai/shared";
@@ -6,17 +6,97 @@ import { heartbeatsApi, type LiveRunForIssue } from "../api/heartbeats";
 import type { TranscriptEntry } from "../adapters";
 import { issuesApi } from "../api/issues";
 import { queryKeys } from "../lib/queryKeys";
-import { cn, relativeTime } from "../lib/utils";
+import { cn, formatTokens, relativeTime } from "../lib/utils";
 import {
   deriveActiveRecoveryDisplayState,
   RECOVERY_CHIP_DEFAULT_TONE,
 } from "../lib/recovery-display";
-import { ExternalLink } from "lucide-react";
+import { Activity, ExternalLink, Eye, Zap } from "lucide-react";
 import { Identity } from "./Identity";
 import { RunChatSurface } from "./RunChatSurface";
 import { useLiveRunTranscripts } from "./transcript/useLiveRunTranscripts";
 import { usePublishSharedQueryData, useSharedPollingQuery } from "../hooks/useSharedPolling";
 import { Badge } from "@/components/ui/badge";
+
+const TELEMETRY_STORAGE_KEY = "paperclip:dashboard:telemetry-mode";
+
+export interface RunTokenMetrics {
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  totalTokens: number;
+  cacheHitRate: number;
+  costUsd: number | null;
+  hasMetrics: boolean;
+}
+
+export function extractRunTokenMetrics(
+  run: LiveRunForIssue,
+  transcript: TranscriptEntry[],
+): RunTokenMetrics {
+  let streamInput = 0;
+  let streamOutput = 0;
+  let streamCached = 0;
+  let streamCost: number | null = null;
+  let hasStreamMetrics = false;
+
+  for (const entry of transcript) {
+    if (entry.kind === "result") {
+      hasStreamMetrics = true;
+      streamInput += entry.inputTokens || 0;
+      streamOutput += entry.outputTokens || 0;
+      streamCached += entry.cachedTokens || 0;
+      if (typeof entry.costUsd === "number" && entry.costUsd > 0) {
+        streamCost = (streamCost ?? 0) + entry.costUsd;
+      }
+    }
+  }
+
+  let dbInput = 0;
+  let dbOutput = 0;
+  let dbCached = 0;
+  let dbCost: number | null = null;
+  let hasDbMetrics = false;
+
+  if (run.usageJson && typeof run.usageJson === "object") {
+    const u = run.usageJson as Record<string, unknown>;
+    dbInput = Number(u.inputTokens ?? u.input_tokens ?? 0);
+    dbOutput = Number(u.outputTokens ?? u.output_tokens ?? 0);
+    dbCached = Number(
+      u.cachedInputTokens ?? u.cached_input_tokens ?? u.cache_read_input_tokens ?? 0,
+    );
+    const rawCost = Number(u.costUsd ?? u.cost_usd ?? u.total_cost_usd ?? 0);
+    if (rawCost > 0) {
+      dbCost = rawCost;
+    }
+    if (dbInput > 0 || dbOutput > 0 || dbCached > 0 || (dbCost ?? 0) > 0) {
+      hasDbMetrics = true;
+    }
+  }
+
+  const inputTokens = Math.max(streamInput, dbInput);
+  const outputTokens = Math.max(streamOutput, dbOutput);
+  const cachedTokens = Math.max(streamCached, dbCached);
+  const costUsd =
+    dbCost != null && streamCost != null
+      ? Math.max(dbCost, streamCost)
+      : (dbCost ?? streamCost);
+
+  const totalTokens = inputTokens + cachedTokens + outputTokens;
+  const totalIn = inputTokens + cachedTokens;
+  const cacheHitRate = totalIn > 0 ? Math.round((cachedTokens / totalIn) * 100) : 0;
+  const hasMetrics = hasStreamMetrics || hasDbMetrics || totalTokens > 0;
+
+  return {
+    inputTokens,
+    outputTokens,
+    cachedTokens,
+    totalTokens,
+    cacheHitRate,
+    costUsd,
+    hasMetrics,
+  };
+}
 
 function RunCardRecoveryChip({ action }: { action: IssueRecoveryAction }) {
   const state = deriveActiveRecoveryDisplayState(action);
@@ -63,6 +143,7 @@ interface ActiveAgentsPanelProps {
   emptyMessage?: string;
   queryScope?: string;
   showMoreLink?: boolean;
+  defaultTelemetryMode?: boolean;
 }
 
 export function ActiveAgentsPanel({
@@ -76,7 +157,26 @@ export function ActiveAgentsPanel({
   emptyMessage = "No recent agent runs.",
   queryScope = "dashboard",
   showMoreLink = true,
+  defaultTelemetryMode,
 }: ActiveAgentsPanelProps) {
+  const [telemetryMode, setTelemetryMode] = useState<boolean>(() => {
+    if (defaultTelemetryMode !== undefined) return defaultTelemetryMode;
+    try {
+      return typeof window !== "undefined" && window.localStorage?.getItem(TELEMETRY_STORAGE_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  const handleToggleTelemetry = (enabled: boolean) => {
+    setTelemetryMode(enabled);
+    try {
+      if (typeof window !== "undefined" && window.localStorage) {
+        window.localStorage.setItem(TELEMETRY_STORAGE_KEY, String(enabled));
+      }
+    } catch {}
+  };
+
   const liveRunsQueryKey = [...queryKeys.liveRuns(companyId), queryScope, { minRunCount, fetchLimit }] as const;
   const sharedLiveRuns = useSharedPollingQuery({
     companyId,
@@ -129,9 +229,47 @@ export function ActiveAgentsPanel({
 
   return (
     <div>
-      <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-        {title}
-      </h3>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          {title}
+        </h3>
+        <div
+          role="group"
+          aria-label="Modo de visualização dos agentes"
+          className="flex items-center gap-1 rounded-lg border border-border/60 bg-muted/40 p-0.5 text-xs"
+        >
+          <button
+            type="button"
+            onClick={() => handleToggleTelemetry(false)}
+            data-testid="agents-mode-simple"
+            aria-pressed={!telemetryMode}
+            className={cn(
+              "flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium transition-colors",
+              !telemetryMode
+                ? "bg-background text-foreground shadow-xs"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Eye className="h-3 w-3" aria-hidden="true" />
+            <span>Simples</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleToggleTelemetry(true)}
+            data-testid="agents-mode-telemetry"
+            aria-pressed={telemetryMode}
+            className={cn(
+              "flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium transition-colors",
+              telemetryMode
+                ? "bg-background text-foreground shadow-xs"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Activity className="h-3 w-3" aria-hidden="true" />
+            <span>Telemetria</span>
+          </button>
+        </div>
+      </div>
       {runs.length === 0 ? (
         <div className="rounded-xl border border-border p-4">
           <p className="text-sm text-muted-foreground">{emptyMessage}</p>
@@ -147,6 +285,7 @@ export function ActiveAgentsPanel({
               transcript={transcriptByRun.get(run.id) ?? EMPTY_TRANSCRIPT}
               hasOutput={hasOutputForRun(run.id)}
               isActive={isRunActive(run)}
+              telemetryMode={telemetryMode}
               className={cardClassName}
             />
           ))}
@@ -170,6 +309,7 @@ const AgentRunCard = memo(function AgentRunCard({
   transcript,
   hasOutput,
   isActive,
+  telemetryMode = false,
   className,
 }: {
   companyId: string;
@@ -178,8 +318,14 @@ const AgentRunCard = memo(function AgentRunCard({
   transcript: TranscriptEntry[];
   hasOutput: boolean;
   isActive: boolean;
+  telemetryMode?: boolean;
   className?: string;
 }) {
+  const metrics = useMemo(
+    () => (telemetryMode ? extractRunTokenMetrics(run, transcript) : null),
+    [telemetryMode, run, transcript],
+  );
+
   return (
     <div className={cn(
       "flex h-(--sz-320px) flex-col overflow-hidden rounded-xl border shadow-sm",
@@ -190,7 +336,7 @@ const AgentRunCard = memo(function AgentRunCard({
     )}>
       <div className="border-b border-border/60 px-3 py-3">
         <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               {isActive ? (
                 <span className="relative flex h-2.5 w-2.5 shrink-0">
@@ -202,8 +348,13 @@ const AgentRunCard = memo(function AgentRunCard({
               )}
               <Identity name={run.agentName} size="sm" className="[&>span:last-child]:!text-(length:--text-micro)" />
             </div>
-            <div className="mt-2 flex items-center gap-2 text-(length:--text-micro) text-muted-foreground">
+            <div className="mt-2 flex items-center justify-between text-(length:--text-micro) text-muted-foreground">
               <span>{isActive ? "Live now" : run.finishedAt ? `Finished ${relativeTime(run.finishedAt)}` : `Started ${relativeTime(run.createdAt)}`}</span>
+              {telemetryMode && metrics && metrics.totalTokens > 0 && (
+                <span className="font-mono font-medium text-foreground/80" data-testid="agent-run-total-tokens">
+                  {formatTokens(metrics.totalTokens)} tok
+                </span>
+              )}
             </div>
           </div>
 
@@ -236,6 +387,50 @@ const AgentRunCard = memo(function AgentRunCard({
           </div>
         )}
       </div>
+
+      {telemetryMode && (
+        <div
+          data-testid="agent-run-telemetry-hud"
+          className="border-b border-border/60 bg-muted/25 px-3 py-1.5"
+        >
+          <div className="flex items-center justify-between gap-1 text-(length:--text-nano)">
+            <div className="flex items-center gap-1.5 font-mono">
+              <span className="text-muted-foreground">In:</span>
+              <span className="font-medium text-foreground">{formatTokens(metrics?.inputTokens ?? 0)}</span>
+              <span className="text-muted-foreground/30">/</span>
+              <span className="text-muted-foreground">Out:</span>
+              <span className="font-medium text-foreground">{formatTokens(metrics?.outputTokens ?? 0)}</span>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              {(metrics?.cachedTokens ?? 0) > 0 ? (
+                <span
+                  className="flex items-center gap-0.5 rounded bg-emerald-500/10 px-1 py-0.5 font-mono font-medium text-emerald-600 dark:text-emerald-400"
+                  title={`Prompt Cache: ${formatTokens(metrics?.cachedTokens ?? 0)} tokens (${metrics?.cacheHitRate}%)`}
+                >
+                  <Zap className="h-2.5 w-2.5" />
+                  <span>{metrics?.cacheHitRate}%</span>
+                </span>
+              ) : (
+                <span className="font-mono text-muted-foreground">
+                  0% cache
+                </span>
+              )}
+
+              {metrics?.costUsd != null && metrics.costUsd > 0 && (
+                <span
+                  className="font-mono font-medium text-amber-600 dark:text-amber-400"
+                  title={`Custo estimado: $${metrics.costUsd.toFixed(4)}`}
+                >
+                  {metrics.costUsd < 0.01
+                    ? "<$0.01"
+                    : `$${metrics.costUsd.toFixed(2)}`}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
         <RunChatSurface

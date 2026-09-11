@@ -38,9 +38,11 @@ vi.mock("./RunChatSurface", () => ({
   RunChatSurface: () => <div>Run output</div>,
 }));
 
+const mockTranscriptByRun = vi.hoisted(() => new Map());
+
 vi.mock("./transcript/useLiveRunTranscripts", () => ({
   useLiveRunTranscripts: () => ({
-    transcriptByRun: new Map(),
+    transcriptByRun: mockTranscriptByRun,
     hasOutputForRun: () => false,
   }),
 }));
@@ -120,6 +122,8 @@ describe("ActiveAgentsPanel", () => {
   let container: HTMLDivElement;
 
   beforeEach(() => {
+    window.localStorage.clear();
+    mockTranscriptByRun.clear();
     container = document.createElement("div");
     document.body.appendChild(container);
     mockHeartbeatsApi.liveRunsForCompany.mockResolvedValue([1, 2, 3, 4, 5].map(createRun));
@@ -127,6 +131,8 @@ describe("ActiveAgentsPanel", () => {
   });
 
   afterEach(() => {
+    window.localStorage.clear();
+    mockTranscriptByRun.clear();
     container.remove();
     document.body.innerHTML = "";
     vi.clearAllMocks();
@@ -227,6 +233,154 @@ describe("ActiveAgentsPanel", () => {
       expect(issueLink?.textContent).toBe("PAP-3562 - Phase 4B: Implement LLM Wiki distillation UI");
       expect(issueLink?.getAttribute("href")).toBe("/issues/PAP-3562");
     });
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("defaults to simple mode without telemetry HUD", async () => {
+    const root = createRoot(container);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <ActiveAgentsPanel companyId="company-1" />
+        </QueryClientProvider>,
+      );
+    });
+    await flushReact();
+
+    const simpleBtn = container.querySelector('[data-testid="agents-mode-simple"]');
+    const telemetryBtn = container.querySelector('[data-testid="agents-mode-telemetry"]');
+    expect(simpleBtn?.getAttribute("aria-pressed")).toBe("true");
+    expect(telemetryBtn?.getAttribute("aria-pressed")).toBe("false");
+
+    const hudElements = container.querySelectorAll('[data-testid="agent-run-telemetry-hud"]');
+    expect(hudElements.length).toBe(0);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("toggles to telemetry mode, persists to localStorage, and renders telemetry HUD", async () => {
+    const root = createRoot(container);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <ActiveAgentsPanel companyId="company-1" />
+        </QueryClientProvider>,
+      );
+    });
+    await flushReact();
+
+    const telemetryBtn = container.querySelector('[data-testid="agents-mode-telemetry"]') as HTMLButtonElement;
+    expect(telemetryBtn).toBeDefined();
+
+    await act(async () => {
+      telemetryBtn.click();
+      await flushReact();
+    });
+
+    expect(window.localStorage.getItem("paperclip:dashboard:telemetry-mode")).toBe("true");
+
+    const hudElements = container.querySelectorAll('[data-testid="agent-run-telemetry-hud"]');
+    expect(hudElements.length).toBeGreaterThan(0);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("renders live in-flight tokens from transcript stream entries", async () => {
+    const run = createRun(1);
+    mockHeartbeatsApi.liveRunsForCompany.mockResolvedValue([run]);
+    mockTranscriptByRun.set(run.id, [
+      {
+        kind: "result",
+        ts: "2026-04-24T12:00:01.000Z",
+        text: "step 1",
+        inputTokens: 12500,
+        outputTokens: 450,
+        cachedTokens: 8000,
+        costUsd: 0.05,
+        subtype: "turn.completed",
+        isError: false,
+        errors: [],
+      },
+    ]);
+
+    const root = createRoot(container);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <ActiveAgentsPanel companyId="company-1" defaultTelemetryMode={true} />
+        </QueryClientProvider>,
+      );
+    });
+    await flushReact();
+
+    const hud = container.querySelector('[data-testid="agent-run-telemetry-hud"]');
+    expect(hud).not.toBeNull();
+    expect(hud?.textContent).toContain("In:12.5k");
+    expect(hud?.textContent).toContain("Out:450");
+    expect(hud?.textContent).toContain("39%"); // 8000 / (12500 + 8000) = 39%
+    expect(hud?.textContent).toContain("$0.05");
+
+    const totalTok = container.querySelector('[data-testid="agent-run-total-tokens"]');
+    expect(totalTok?.textContent).toContain("20.9k tok");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("renders authoritative token metrics from usageJson", async () => {
+    const runWithUsage = {
+      ...createRun(1),
+      status: "succeeded",
+      finishedAt: "2026-04-24T12:05:00.000Z",
+      usageJson: {
+        inputTokens: 42000,
+        outputTokens: 1200,
+        cachedInputTokens: 35000,
+        costUsd: 0.12,
+      },
+    };
+    mockHeartbeatsApi.liveRunsForCompany.mockResolvedValue([runWithUsage]);
+
+    const root = createRoot(container);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <ActiveAgentsPanel companyId="company-1" defaultTelemetryMode={true} />
+        </QueryClientProvider>,
+      );
+    });
+    await flushReact();
+
+    const hud = container.querySelector('[data-testid="agent-run-telemetry-hud"]');
+    expect(hud).not.toBeNull();
+    expect(hud?.textContent).toContain("In:42.0k");
+    expect(hud?.textContent).toContain("Out:1.2k");
+    expect(hud?.textContent).toContain("45%"); // 35000 / (42000 + 35000) = 45%
+    expect(hud?.textContent).toContain("$0.12");
 
     await act(async () => {
       root.unmount();
