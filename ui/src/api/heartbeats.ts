@@ -74,6 +74,7 @@ export interface LiveRunForIssue {
   currentToolName?: string | null;
   lastAssistantSnippet?: string | null;
   lastEventAt?: string | null;
+  usageJson?: Record<string, unknown> | null;
 }
 
 export interface WatchdogDecisionInput {
