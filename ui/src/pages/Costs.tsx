@@ -8,10 +8,13 @@ import type {
   CostWindowSpendRow,
   FinanceEvent,
   QuotaWindow,
+  BudgetScopeType,
 } from "@paperclipai/shared";
-import { ArrowDownLeft, ArrowUpRight, ChevronDown, ChevronRight, Coins, DollarSign, ReceiptText } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, ChevronDown, ChevronRight, Coins, DollarSign, Plus, ReceiptText } from "lucide-react";
+import { companiesApi } from "../api/companies";
 import { budgetsApi } from "../api/budgets";
 import { costsApi } from "../api/costs";
+import { AddBudgetModal } from "../components/AddBudgetModal";
 import { BillerSpendCard } from "../components/BillerSpendCard";
 import { BudgetIncidentCard } from "../components/BudgetIncidentCard";
 import { BudgetPolicyCard } from "../components/BudgetPolicyCard";
@@ -163,7 +166,7 @@ export function Costs({
   lockTab = false,
   hideBudgetsTab = false,
 }: CostsProps = {}) {
-  const { selectedCompanyId } = useCompany();
+  const { selectedCompany, selectedCompanyId } = useCompany();
   const { setBreadcrumbs } = useBreadcrumbs();
   const queryClient = useQueryClient();
 
@@ -565,7 +568,24 @@ export function Costs({
 
   const billedSpendCents = spendData?.summary.spendCents ?? 0;
   const isSubscriptionOnly = billedSpendCents === 0 && effectiveSimulatedCostCents > 0;
-  const hideInternal = Boolean(spendData?.summary.hideInternalCostFromClient);
+
+  const [viewModeOverride, setViewModeOverride] = useState<"client" | "operator" | null>(null);
+  const [addBudgetOpen, setAddBudgetOpen] = useState<boolean>(false);
+  const [addBudgetScopeType, setAddBudgetScopeType] = useState<BudgetScopeType>("company");
+
+  const isCompanyHideInternal = Boolean(spendData?.summary.hideInternalCostFromClient);
+  const hideInternal = viewModeOverride !== null
+    ? viewModeOverride === "client"
+    : isCompanyHideInternal;
+
+  const updateCompanyDefaultMutation = useMutation({
+    mutationFn: (hideInternalCostFromClient: boolean) =>
+      companiesApi.update(selectedCompanyId!, { hideInternalCostFromClient }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.companies.all });
+      queryClient.invalidateQueries({ queryKey: ["costs", selectedCompanyId!] });
+    },
+  });
 
   const effectiveBillableCents = useMemo<number>(() => {
     if ((spendData?.summary.billableCents ?? 0) > 0) {
@@ -595,6 +615,37 @@ export function Costs({
     project: budgetPolicies.filter((policy) => policy.scopeType === "project"),
   }), [budgetPolicies]);
 
+  const companyBudgetRows = useMemo<BudgetPolicySummary[]>(() => {
+    if (budgetPoliciesByScope.company.length > 0) {
+      return budgetPoliciesByScope.company;
+    }
+    const resolvedCompId = selectedCompanyId ?? "";
+    const orgLimit = selectedCompany?.budgetMonthlyCents ?? spendData?.summary.budgetCents ?? 0;
+    const orgSpend = spendData?.summary.spendCents ?? 0;
+    return [{
+      policyId: "",
+      companyId: resolvedCompId,
+      scopeType: "company",
+      scopeId: resolvedCompId,
+      scopeName: selectedCompany?.name ?? "Organization",
+      metric: "billed_cents",
+      windowKind: "calendar_month_utc",
+      amount: orgLimit,
+      observedAmount: orgSpend,
+      remainingAmount: Math.max(0, orgLimit - orgSpend),
+      utilizationPercent: orgLimit > 0 ? Number(((orgSpend / orgLimit) * 100).toFixed(2)) : 0,
+      warnPercent: 80,
+      hardStopEnabled: true,
+      notifyEnabled: true,
+      isActive: orgLimit > 0,
+      status: orgLimit > 0 && orgSpend >= orgLimit ? "hard_stop" : "ok",
+      paused: false,
+      pauseReason: null,
+      windowStart: new Date(),
+      windowEnd: new Date(),
+    }];
+  }, [budgetPoliciesByScope.company, selectedCompany, spendData, selectedCompanyId]);
+
   if (!selectedCompanyId) {
     return <EmptyState icon={DollarSign} message="Select an organization to view costs." />;
   }
@@ -608,20 +659,44 @@ export function Costs({
         <div className="space-y-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-3">
                 {embedded ? (
                   <h2 className="text-lg font-semibold text-foreground">Costs</h2>
                 ) : (
                   <h1 className="text-3xl font-semibold tracking-tight">Costs</h1>
                 )}
-                {hideInternal ? (
-                  <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
-                    Client View (Internal costs hidden)
-                  </span>
-                ) : (
-                  <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
+                <div className="inline-flex items-center rounded-lg border border-border p-0.5 bg-muted/40 text-xs">
+                  <button
+                    type="button"
+                    className={cn(
+                      "rounded-md px-2.5 py-1 font-medium transition-colors cursor-pointer",
+                      hideInternal ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
+                    )}
+                    onClick={() => setViewModeOverride("client")}
+                  >
+                    Client View
+                  </button>
+                  <button
+                    type="button"
+                    className={cn(
+                      "rounded-md px-2.5 py-1 font-medium transition-colors cursor-pointer",
+                      !hideInternal ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
+                    )}
+                    onClick={() => setViewModeOverride("operator")}
+                  >
                     Operator View
-                  </span>
+                  </button>
+                </div>
+                {hideInternal !== isCompanyHideInternal && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs"
+                    disabled={updateCompanyDefaultMutation.isPending}
+                    onClick={() => updateCompanyDefaultMutation.mutate(hideInternal)}
+                  >
+                    {updateCompanyDefaultMutation.isPending ? "Saving..." : "Save as org default"}
+                  </Button>
                 )}
               </div>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
@@ -793,17 +868,16 @@ export function Costs({
                         <div className="text-3xl font-semibold tabular-nums">
                           {hideInternal
                             ? formatCents(effectiveBillableCents)
-                            : isSubscriptionOnly
-                              ? formatCents(effectiveSimulatedCostCents)
-                              : formatCents(billedSpendCents)}
-                          {!hideInternal && isSubscriptionOnly ? (
-                            <span className="ml-2 text-sm font-normal text-muted-foreground">(simulated)</span>
-                          ) : null}
+                            : formatCents(effectiveBillableCents > 0 ? effectiveBillableCents : billedSpendCents)}
                         </div>
                         <div className="mt-1 text-sm text-muted-foreground">
-                          {spendData?.summary.budgetCents && spendData.summary.budgetCents > 0
-                            ? `Budget ${formatCents(spendData.summary.budgetCents)}`
-                            : "Unlimited budget"}
+                          {hideInternal ? (
+                            spendData?.summary.budgetCents && spendData.summary.budgetCents > 0
+                              ? `Budget ${formatCents(spendData.summary.budgetCents)}`
+                              : "Unlimited budget"
+                          ) : (
+                            `Real API spend: ${formatCents(billedSpendCents)} · Margin: ${effectiveMarginCents >= 0 ? "+" : ""}${formatCents(effectiveMarginCents)}`
+                          )}
                         </div>
                       </div>
                       <div className="border border-border px-4 py-3 text-right">
@@ -811,9 +885,9 @@ export function Costs({
                         <div className="mt-1 text-lg font-medium tabular-nums">
                           {formatTokens(inferenceTokenTotal)}
                         </div>
-                        {!hideInternal && (effectiveSimulatedCostCents > 0 || (spendData?.summary.subscriptionTokens ?? 0) > 0) ? (
+                        {!hideInternal && effectiveSimulatedCostCents > 0 ? (
                           <div className="text-xs text-muted-foreground mt-0.5">
-                            sim. {formatCents(effectiveSimulatedCostCents)}
+                            Benchmark: {formatCents(effectiveSimulatedCostCents)}
                           </div>
                         ) : null}
                       </div>
@@ -883,29 +957,29 @@ export function Costs({
                               </div>
                               <div className="text-right text-sm tabular-nums">
                                 <div className="font-medium">
-                                  {formatCents(hideInternal ? (row.billableCents ?? row.costCents) : row.costCents)}
-                                  {!hideInternal && row.costCents === 0 && (row.simulatedCostCents ?? 0) > 0 ? (
-                                    <span className="ml-1 text-xs text-muted-foreground font-normal">
-                                      (sim. {formatCents(row.simulatedCostCents ?? 0)})
-                                    </span>
-                                  ) : !hideInternal && row.costCents === 0 && (row.inputTokens + row.cachedInputTokens + row.outputTokens > 0) ? (
-                                    <span className="ml-1 text-xs text-muted-foreground font-normal">
-                                      (sim. {formatCents(Math.max(1, Math.round(((row.inputTokens + row.cachedInputTokens + row.outputTokens) / 1_000_000) * 5.0 * 100)))})
-                                    </span>
-                                  ) : null}
+                                  {formatCents(
+                                    (row.billableCents ?? 0) > 0
+                                      ? row.billableCents!
+                                      : row.costCents > 0
+                                        ? row.costCents
+                                        : row.simulatedCostCents ?? 0,
+                                  )}
                                 </div>
                                 <div className="text-xs text-muted-foreground">
                                   in {formatTokens(row.inputTokens + row.cachedInputTokens)} · out {formatTokens(row.outputTokens)}
                                 </div>
-                                {!hideInternal && (row.apiRunCount > 0 || row.subscriptionRunCount > 0) ? (
+                                {hideInternal ? (
                                   <div className="text-xs text-muted-foreground">
-                                    {row.apiRunCount > 0 ? `${row.apiRunCount} api` : "0 api"}
-                                    {" · "}
-                                    {row.subscriptionRunCount > 0
-                                      ? `${row.subscriptionRunCount} subscription`
-                                      : "0 subscription"}
+                                    {row.apiRunCount + row.subscriptionRunCount} runs
                                   </div>
-                                ) : null}
+                                ) : (
+                                  <div className="text-xs text-muted-foreground">
+                                    {row.costCents > 0 ? `API cost: ${formatCents(row.costCents)}` : "API cost: $0.00"}
+                                    {" · "}
+                                    {row.apiRunCount + row.subscriptionRunCount} runs
+                                    {row.subscriptionRunCount > 0 ? ` (${row.subscriptionRunCount} byok)` : ""}
+                                  </div>
+                                )}
                               </div>
                             </div>
 
@@ -930,13 +1004,15 @@ export function Costs({
                                       </div>
                                       <div className="text-right tabular-nums">
                                         <div className="font-medium">
-                                          {formatCents(hideInternal ? (modelRow.billableCents ?? modelRow.costCents) : modelRow.costCents)}
+                                          {formatCents(
+                                            (modelRow.billableCents ?? 0) > 0
+                                              ? modelRow.billableCents!
+                                              : modelRow.costCents > 0
+                                                ? modelRow.costCents
+                                                : modelRow.simulatedCostCents ?? 0,
+                                          )}
                                           {!hideInternal && modelRow.costCents > 0 ? (
                                             <span className="ml-1 font-normal text-muted-foreground">({sharePct}%)</span>
-                                          ) : !hideInternal && (modelRow.simulatedCostCents ?? 0) > 0 ? (
-                                            <span className="ml-1 font-normal text-muted-foreground text-xs">(sim. {formatCents(modelRow.simulatedCostCents ?? 0)})</span>
-                                          ) : !hideInternal && (modelRow.inputTokens + modelRow.cachedInputTokens + modelRow.outputTokens > 0) ? (
-                                            <span className="ml-1 font-normal text-muted-foreground text-xs">(sim. {formatCents(Math.max(1, Math.round(((modelRow.inputTokens + modelRow.cachedInputTokens + modelRow.outputTokens) / 1_000_000) * 5.0 * 100)))})</span>
                                           ) : null}
                                         </div>
                                         <div className="text-muted-foreground">
@@ -995,11 +1071,23 @@ export function Costs({
           ) : (
             <>
               <Card className="border-border/70 bg-(image:--gradient-extract-2)">
-                <CardHeader className="px-5 pt-5 pb-3">
-                  <CardTitle className="text-base">Budget control plane</CardTitle>
-                  <CardDescription>
-                    Hard-stop spend limits for agents and projects. Provider subscription quota stays separate and appears under Providers.
-                  </CardDescription>
+                <CardHeader className="flex flex-row items-start justify-between px-5 pt-5 pb-3">
+                  <div>
+                    <CardTitle className="text-base">Budget control plane</CardTitle>
+                    <CardDescription>
+                      Hard-stop spend limits for agents and projects. Provider subscription quota stays separate and appears under Providers.
+                    </CardDescription>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setAddBudgetScopeType("company");
+                      setAddBudgetOpen(true);
+                    }}
+                    className="gap-1.5 shrink-0"
+                  >
+                    <Plus className="h-4 w-4" /> Set Budget
+                  </Button>
                 </CardHeader>
                 <CardContent className="grid gap-3 px-5 pb-5 pt-0 md:grid-cols-4">
                   <MetricTile
@@ -1056,49 +1144,144 @@ export function Costs({
                 </div>
               ) : null}
 
-              <div className="space-y-5">
-                {(["company", "agent", "project"] as const).map((scopeType) => {
-                  const rows = budgetPoliciesByScope[scopeType];
-                  if (rows.length === 0) return null;
-                  return (
-                    <section key={scopeType} className="space-y-3">
-                      <div>
-                        <h2 className="text-lg font-semibold capitalize">{scopeType === "company" ? "organization" : scopeType} budgets</h2>
-                        <p className="text-sm text-muted-foreground">
-                          {scopeType === "company"
-                            ? "Organization-wide monthly policy."
-                            : scopeType === "agent"
-                              ? "Recurring monthly spend policies for individual agents."
-                              : "Lifetime spend policies for execution-bound projects."}
-                        </p>
-                      </div>
-                      <div className="grid gap-4 xl:grid-cols-2">
-                        {rows.map((summary) => (
-                          <BudgetPolicyCard
-                            key={summary.policyId}
-                            summary={summary}
-                            isSaving={policyMutation.isPending}
-                            onSave={(amount) =>
-                              policyMutation.mutate({
-                                scopeType: summary.scopeType,
-                                scopeId: summary.scopeId,
-                                amount,
-                                windowKind: summary.windowKind,
-                              })}
-                          />
-                        ))}
-                      </div>
-                    </section>
-                  );
-                })}
+              <div className="space-y-6">
+                {/* Organization Budgets */}
+                <section className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-lg font-semibold">Organization budget</h2>
+                      <p className="text-sm text-muted-foreground">Organization-wide monthly policy.</p>
+                    </div>
+                  </div>
+                  <div className="grid gap-4 xl:grid-cols-2">
+                    {companyBudgetRows.map((summary) => (
+                      <BudgetPolicyCard
+                        key={summary.policyId || "org-budget-policy"}
+                        summary={summary}
+                        isSaving={policyMutation.isPending}
+                        onSave={(amount) =>
+                          policyMutation.mutate({
+                            scopeType: "company",
+                            scopeId: selectedCompanyId,
+                            amount,
+                            windowKind: "calendar_month_utc",
+                          })}
+                      />
+                    ))}
+                  </div>
+                </section>
 
-                {budgetPolicies.length === 0 ? (
-                  <Card>
-                    <CardContent className="px-5 py-8 text-sm text-muted-foreground">
-                      No budget policies yet. Set agent and project budgets from their detail pages, or use the existing organization monthly budget control.
-                    </CardContent>
-                  </Card>
-                ) : null}
+                {/* Agent Budgets */}
+                <section className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-lg font-semibold">Agent budgets</h2>
+                      <p className="text-sm text-muted-foreground">Recurring monthly spend policies for individual agents.</p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setAddBudgetScopeType("agent");
+                        setAddBudgetOpen(true);
+                      }}
+                      className="gap-1.5"
+                    >
+                      <Plus className="h-4 w-4" /> Add Agent Budget
+                    </Button>
+                  </div>
+                  {budgetPoliciesByScope.agent.length === 0 ? (
+                    <Card>
+                      <CardContent className="flex flex-col items-center justify-center p-6 text-center">
+                        <p className="text-sm text-muted-foreground mb-3">No individual agent budget caps configured.</p>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => {
+                            setAddBudgetScopeType("agent");
+                            setAddBudgetOpen(true);
+                          }}
+                          className="gap-1.5"
+                        >
+                          <Plus className="h-4 w-4" /> Set an agent budget limit
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    <div className="grid gap-4 xl:grid-cols-2">
+                      {budgetPoliciesByScope.agent.map((summary) => (
+                        <BudgetPolicyCard
+                          key={summary.policyId}
+                          summary={summary}
+                          isSaving={policyMutation.isPending}
+                          onSave={(amount) =>
+                            policyMutation.mutate({
+                              scopeType: "agent",
+                              scopeId: summary.scopeId,
+                              amount,
+                              windowKind: summary.windowKind,
+                            })}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                {/* Project Budgets */}
+                <section className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-lg font-semibold">Project budgets</h2>
+                      <p className="text-sm text-muted-foreground">Lifetime spend policies for execution-bound projects.</p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setAddBudgetScopeType("project");
+                        setAddBudgetOpen(true);
+                      }}
+                      className="gap-1.5"
+                    >
+                      <Plus className="h-4 w-4" /> Add Project Budget
+                    </Button>
+                  </div>
+                  {budgetPoliciesByScope.project.length === 0 ? (
+                    <Card>
+                      <CardContent className="flex flex-col items-center justify-center p-6 text-center">
+                        <p className="text-sm text-muted-foreground mb-3">No project spend caps configured.</p>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => {
+                            setAddBudgetScopeType("project");
+                            setAddBudgetOpen(true);
+                          }}
+                          className="gap-1.5"
+                        >
+                          <Plus className="h-4 w-4" /> Set a project budget limit
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    <div className="grid gap-4 xl:grid-cols-2">
+                      {budgetPoliciesByScope.project.map((summary) => (
+                        <BudgetPolicyCard
+                          key={summary.policyId}
+                          summary={summary}
+                          isSaving={policyMutation.isPending}
+                          onSave={(amount) =>
+                            policyMutation.mutate({
+                              scopeType: "project",
+                              scopeId: summary.scopeId,
+                              amount,
+                              windowKind: summary.windowKind,
+                            })}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </section>
               </div>
             </>
           )}
@@ -1253,6 +1436,14 @@ export function Costs({
           )}
         </TabsContent>
       </Tabs>
+
+      <AddBudgetModal
+        open={addBudgetOpen}
+        onOpenChange={setAddBudgetOpen}
+        companyId={selectedCompanyId}
+        companyName={selectedCompany?.name ?? "Organization"}
+        initialScopeType={addBudgetScopeType}
+      />
     </div>
   );
 }
