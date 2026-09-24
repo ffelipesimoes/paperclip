@@ -565,6 +565,26 @@ export function Costs({
 
   const billedSpendCents = spendData?.summary.spendCents ?? 0;
   const isSubscriptionOnly = billedSpendCents === 0 && effectiveSimulatedCostCents > 0;
+  const hideInternal = Boolean(spendData?.summary.hideInternalCostFromClient);
+
+  const effectiveBillableCents = useMemo<number>(() => {
+    if ((spendData?.summary.billableCents ?? 0) > 0) {
+      return spendData!.summary.billableCents ?? 0;
+    }
+    const fromByAgent = (spendData?.byAgent ?? []).reduce(
+      (sum, row) => sum + (row.billableCents ?? 0),
+      0,
+    );
+    if (fromByAgent > 0) return fromByAgent;
+    return effectiveSimulatedCostCents > 0 ? effectiveSimulatedCostCents : billedSpendCents;
+  }, [spendData, effectiveSimulatedCostCents, billedSpendCents]);
+
+  const effectiveMarginCents = useMemo<number>(() => {
+    if ((spendData?.summary.marginCents ?? 0) !== 0) {
+      return spendData!.summary.marginCents ?? 0;
+    }
+    return effectiveBillableCents - billedSpendCents;
+  }, [spendData, effectiveBillableCents, billedSpendCents]);
 
   const topFinanceEvents = (financeData?.events ?? []) as FinanceEvent[];
   const budgetPolicies = budgetData?.policies ?? [];
@@ -588,11 +608,22 @@ export function Costs({
         <div className="space-y-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              {embedded ? (
-                <h2 className="text-lg font-semibold text-foreground">Costs</h2>
-              ) : (
-                <h1 className="text-3xl font-semibold tracking-tight">Costs</h1>
-              )}
+              <div className="flex items-center gap-2">
+                {embedded ? (
+                  <h2 className="text-lg font-semibold text-foreground">Costs</h2>
+                ) : (
+                  <h1 className="text-3xl font-semibold tracking-tight">Costs</h1>
+                )}
+                {hideInternal ? (
+                  <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
+                    Client View (Internal costs hidden)
+                  </span>
+                ) : (
+                  <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
+                    Operator View
+                  </span>
+                )}
+              </div>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
                 Inference spend, platform fees, credits, and live quota windows.
               </p>
@@ -632,44 +663,79 @@ export function Costs({
           ) : null}
 
           <div className="grid gap-3 lg:grid-cols-4">
-            <MetricTile
-              label={isSubscriptionOnly ? "Inference value (sim.)" : "Inference spend"}
-              value={isSubscriptionOnly ? formatCents(effectiveSimulatedCostCents) : formatCents(billedSpendCents)}
-              subtitle={
-                isSubscriptionOnly
-                  ? `${formatTokens(inferenceTokenTotal)} tokens · Sim. value ($0 billed)`
-                  : `${formatTokens(inferenceTokenTotal)} tokens across request-scoped events`
-              }
-              icon={DollarSign}
-            />
-            <MetricTile
-              label="Budget"
-              value={activeBudgetIncidents.length > 0 ? String(activeBudgetIncidents.length) : (
-                spendData?.summary.budgetCents && spendData.summary.budgetCents > 0
-                  ? `${spendData.summary.utilizationPercent}%`
-                  : "Open"
-              )}
-              subtitle={
-                activeBudgetIncidents.length > 0
-                  ? `${budgetData?.pausedAgentCount ?? 0} agents paused · ${budgetData?.pausedProjectCount ?? 0} projects paused`
-                  : spendData?.summary.budgetCents && spendData.summary.budgetCents > 0
-                    ? `${formatCents(spendData.summary.spendCents)} of ${formatCents(spendData.summary.budgetCents)}`
-                    : "No monthly cap configured"
-              }
-              icon={Coins}
-            />
-            <MetricTile
-              label="Finance net"
-              value={formatCents(financeData?.summary.netCents ?? 0)}
-              subtitle={`${formatCents(financeData?.summary.debitCents ?? 0)} debits · ${formatCents(financeData?.summary.creditCents ?? 0)} credits`}
-              icon={ReceiptText}
-            />
-            <MetricTile
-              label="Finance events"
-              value={String(financeData?.summary.eventCount ?? 0)}
-              subtitle={`${formatCents(financeData?.summary.estimatedDebitCents ?? 0)} estimated in range`}
-              icon={ArrowUpRight}
-            />
+            {hideInternal ? (
+              <>
+                <MetricTile
+                  label="Inference spend"
+                  value={formatCents(effectiveBillableCents)}
+                  subtitle={`${formatTokens(inferenceTokenTotal)} tokens across billable events`}
+                  icon={DollarSign}
+                />
+                <MetricTile
+                  label="Budget"
+                  value={activeBudgetIncidents.length > 0 ? String(activeBudgetIncidents.length) : (
+                    spendData?.summary.budgetCents && spendData.summary.budgetCents > 0
+                      ? `${spendData.summary.utilizationPercent}%`
+                      : "Open"
+                  )}
+                  subtitle={
+                    activeBudgetIncidents.length > 0
+                      ? `${budgetData?.pausedAgentCount ?? 0} agents paused · ${budgetData?.pausedProjectCount ?? 0} projects paused`
+                      : spendData?.summary.budgetCents && spendData.summary.budgetCents > 0
+                        ? `${formatCents(effectiveBillableCents)} of ${formatCents(spendData.summary.budgetCents)}`
+                        : "No monthly cap configured"
+                  }
+                  icon={Coins}
+                />
+                <MetricTile
+                  label="Finance net"
+                  value={formatCents(financeData?.summary.netCents ?? 0)}
+                  subtitle={`${formatCents(financeData?.summary.debitCents ?? 0)} debits · ${formatCents(financeData?.summary.creditCents ?? 0)} credits`}
+                  icon={ReceiptText}
+                />
+                <MetricTile
+                  label="Finance events"
+                  value={String(financeData?.summary.eventCount ?? 0)}
+                  subtitle={`${formatCents(financeData?.summary.estimatedDebitCents ?? 0)} estimated in range`}
+                  icon={ArrowUpRight}
+                />
+              </>
+            ) : (
+              <>
+                <MetricTile
+                  label="Client billable"
+                  value={formatCents(effectiveBillableCents)}
+                  subtitle={`${formatTokens(inferenceTokenTotal)} tokens · Commercial value`}
+                  icon={DollarSign}
+                />
+                <MetricTile
+                  label="Net margin / spread"
+                  value={`${effectiveMarginCents >= 0 ? "+" : ""}${formatCents(effectiveMarginCents)}`}
+                  subtitle={
+                    billedSpendCents === 0 && effectiveSimulatedCostCents > 0
+                      ? "100% margin (subscription token spread)"
+                      : "Commercial billable minus real API spend"
+                  }
+                  icon={ArrowUpRight}
+                />
+                <MetricTile
+                  label="Real API spend"
+                  value={formatCents(billedSpendCents)}
+                  subtitle={
+                    isSubscriptionOnly
+                      ? "Subscription included ($0 marginal spend)"
+                      : "Billed invoice cost across metered runs"
+                  }
+                  icon={ReceiptText}
+                />
+                <MetricTile
+                  label="Simulated benchmark"
+                  value={formatCents(effectiveSimulatedCostCents)}
+                  subtitle="Standard market API token benchmark"
+                  icon={Coins}
+                />
+              </>
+            )}
           </div>
         </div>
       ) : null}
@@ -725,8 +791,12 @@ export function Costs({
                     <div className="flex flex-wrap items-end justify-between gap-3">
                       <div>
                         <div className="text-3xl font-semibold tabular-nums">
-                          {isSubscriptionOnly ? formatCents(effectiveSimulatedCostCents) : formatCents(billedSpendCents)}
-                          {isSubscriptionOnly ? (
+                          {hideInternal
+                            ? formatCents(effectiveBillableCents)
+                            : isSubscriptionOnly
+                              ? formatCents(effectiveSimulatedCostCents)
+                              : formatCents(billedSpendCents)}
+                          {!hideInternal && isSubscriptionOnly ? (
                             <span className="ml-2 text-sm font-normal text-muted-foreground">(simulated)</span>
                           ) : null}
                         </div>
@@ -741,7 +811,7 @@ export function Costs({
                         <div className="mt-1 text-lg font-medium tabular-nums">
                           {formatTokens(inferenceTokenTotal)}
                         </div>
-                        {(effectiveSimulatedCostCents > 0 || (spendData?.summary.subscriptionTokens ?? 0) > 0) ? (
+                        {!hideInternal && (effectiveSimulatedCostCents > 0 || (spendData?.summary.subscriptionTokens ?? 0) > 0) ? (
                           <div className="text-xs text-muted-foreground mt-0.5">
                             sim. {formatCents(effectiveSimulatedCostCents)}
                           </div>
@@ -813,12 +883,12 @@ export function Costs({
                               </div>
                               <div className="text-right text-sm tabular-nums">
                                 <div className="font-medium">
-                                  {formatCents(row.costCents)}
-                                  {row.costCents === 0 && (row.simulatedCostCents ?? 0) > 0 ? (
+                                  {formatCents(hideInternal ? (row.billableCents ?? row.costCents) : row.costCents)}
+                                  {!hideInternal && row.costCents === 0 && (row.simulatedCostCents ?? 0) > 0 ? (
                                     <span className="ml-1 text-xs text-muted-foreground font-normal">
                                       (sim. {formatCents(row.simulatedCostCents ?? 0)})
                                     </span>
-                                  ) : row.costCents === 0 && (row.inputTokens + row.cachedInputTokens + row.outputTokens > 0) ? (
+                                  ) : !hideInternal && row.costCents === 0 && (row.inputTokens + row.cachedInputTokens + row.outputTokens > 0) ? (
                                     <span className="ml-1 text-xs text-muted-foreground font-normal">
                                       (sim. {formatCents(Math.max(1, Math.round(((row.inputTokens + row.cachedInputTokens + row.outputTokens) / 1_000_000) * 5.0 * 100)))})
                                     </span>
@@ -827,7 +897,7 @@ export function Costs({
                                 <div className="text-xs text-muted-foreground">
                                   in {formatTokens(row.inputTokens + row.cachedInputTokens)} · out {formatTokens(row.outputTokens)}
                                 </div>
-                                {(row.apiRunCount > 0 || row.subscriptionRunCount > 0) ? (
+                                {!hideInternal && (row.apiRunCount > 0 || row.subscriptionRunCount > 0) ? (
                                   <div className="text-xs text-muted-foreground">
                                     {row.apiRunCount > 0 ? `${row.apiRunCount} api` : "0 api"}
                                     {" · "}
@@ -860,12 +930,12 @@ export function Costs({
                                       </div>
                                       <div className="text-right tabular-nums">
                                         <div className="font-medium">
-                                          {formatCents(modelRow.costCents)}
-                                          {modelRow.costCents > 0 ? (
+                                          {formatCents(hideInternal ? (modelRow.billableCents ?? modelRow.costCents) : modelRow.costCents)}
+                                          {!hideInternal && modelRow.costCents > 0 ? (
                                             <span className="ml-1 font-normal text-muted-foreground">({sharePct}%)</span>
-                                          ) : (modelRow.simulatedCostCents ?? 0) > 0 ? (
+                                          ) : !hideInternal && (modelRow.simulatedCostCents ?? 0) > 0 ? (
                                             <span className="ml-1 font-normal text-muted-foreground text-xs">(sim. {formatCents(modelRow.simulatedCostCents ?? 0)})</span>
-                                          ) : (modelRow.inputTokens + modelRow.cachedInputTokens + modelRow.outputTokens > 0) ? (
+                                          ) : !hideInternal && (modelRow.inputTokens + modelRow.cachedInputTokens + modelRow.outputTokens > 0) ? (
                                             <span className="ml-1 font-normal text-muted-foreground text-xs">(sim. {formatCents(Math.max(1, Math.round(((modelRow.inputTokens + modelRow.cachedInputTokens + modelRow.outputTokens) / 1_000_000) * 5.0 * 100)))})</span>
                                           ) : null}
                                         </div>
@@ -901,7 +971,9 @@ export function Costs({
                             className="flex items-center justify-between gap-3 border border-border px-3 py-2 text-sm"
                           >
                             <span className="truncate">{row.projectName ?? row.projectId ?? "Unattributed"}</span>
-                            <span className="font-medium tabular-nums">{formatCents(row.costCents)}</span>
+                            <span className="font-medium tabular-nums">
+                              {formatCents(hideInternal ? (row.billableCents ?? row.costCents) : row.costCents)}
+                            </span>
                           </div>
                         ))
                       )}

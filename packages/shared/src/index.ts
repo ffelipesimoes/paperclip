@@ -470,6 +470,7 @@ export {
   FINANCE_UNITS,
   BUDGET_SCOPE_TYPES,
   BUDGET_METRICS,
+  BILLING_PRICING_MODES,
   BUDGET_WINDOW_KINDS,
   BUDGET_THRESHOLD_TYPES,
   BUDGET_INCIDENT_STATUSES,
@@ -656,6 +657,7 @@ export {
   type FinanceUnit,
   type BudgetScopeType,
   type BudgetMetric,
+  type BillingPricingMode,
   type BudgetWindowKind,
   type BudgetThresholdType,
   type BudgetIncidentStatus,
@@ -2747,4 +2749,5 @@ export {
   simulateCostUsd,
   simulateCostCents,
   simulateCacheSavingsCents,
+  calculateBillableCents,
 } from "./pricing.js";

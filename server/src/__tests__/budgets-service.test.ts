@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { eq } from "drizzle-orm";
 import {
   agents,
   approvals,
@@ -389,6 +390,8 @@ describeEmbeddedPostgres("budgetService release gate enforcement", () => {
     agentId: string;
     projectId?: string | null;
     costCents: number;
+    simulatedCostCents?: number | null;
+    billableCents?: number | null;
     occurredAt?: Date;
   }) {
     const [event] = await db
@@ -405,6 +408,8 @@ describeEmbeddedPostgres("budgetService release gate enforcement", () => {
         cachedInputTokens: 10,
         outputTokens: 20,
         costCents: input.costCents,
+        simulatedCostCents: input.simulatedCostCents ?? input.costCents,
+        billableCents: input.billableCents ?? input.costCents,
         occurredAt: input.occurredAt ?? new Date(),
       })
       .returning();
@@ -636,5 +641,61 @@ describeEmbeddedPostgres("budgetService release gate enforcement", () => {
       pauseReason: null,
     });
     expect(overviewAfterResume.activeIncidents).toHaveLength(0);
+  });
+
+  it("pauses an agent and blocks invocation when simulated cost reaches a simulated_cents hard-stop budget", async () => {
+    const { companyId, agentId } = await createBudgetFixture();
+    const cancelWorkForScope = vi.fn().mockResolvedValue(undefined);
+    const service = budgetService(db, { cancelWorkForScope });
+
+    // Set a policy on simulated_cents for 500 cents ($5.00)
+    await db.insert(budgetPolicies).values({
+      companyId,
+      scopeType: "agent",
+      scopeId: agentId,
+      metric: "simulated_cents",
+      windowKind: "calendar_month_utc",
+      amount: 500,
+      warnPercent: 80,
+      hardStopEnabled: true,
+      notifyEnabled: true,
+      isActive: true,
+    });
+
+    // Cost event with $0 direct spend (e.g. subscription), but 600 cents simulated cost
+    const event = await insertCostEvent({
+      companyId,
+      agentId,
+      costCents: 0,
+      simulatedCostCents: 600,
+    });
+
+    await service.evaluateCostEvent(event);
+
+    const [agentRow] = await db
+      .select({ status: agents.status, pauseReason: agents.pauseReason })
+      .from(agents)
+      .where(eq(agents.id, agentId));
+
+    expect(agentRow.status).toBe("paused");
+    expect(agentRow.pauseReason).toBe("budget");
+    expect(cancelWorkForScope).toHaveBeenCalledWith({ companyId, scopeType: "agent", scopeId: agentId });
+
+    const block = await service.getInvocationBlock(companyId, agentId);
+    expect(block).toMatchObject({
+      scopeType: "agent",
+      scopeId: agentId,
+      reason: "Agent is paused because its budget hard-stop was reached.",
+    });
+
+    const overview = await service.overview(companyId);
+    expect(overview.pausedAgentCount).toBe(1);
+    expect(overview.policies[0]).toMatchObject({
+      metric: "simulated_cents",
+      amount: 500,
+      observedAmount: 600,
+      status: "hard_stop",
+      paused: true,
+    });
   });
 });

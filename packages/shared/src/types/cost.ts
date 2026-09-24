@@ -18,6 +18,8 @@ export interface CostEvent {
   cachedInputTokens: number;
   outputTokens: number;
   costCents: number;
+  simulatedCostCents?: number;
+  billableCents?: number;
   occurredAt: Date;
   createdAt: Date;
 }
@@ -29,6 +31,9 @@ export interface CostSummary {
   utilizationPercent: number;
   simulatedCostCents?: number;
   subscriptionTokens?: number;
+  billableCents?: number;
+  marginCents?: number;
+  hideInternalCostFromClient?: boolean;
 }
 
 export interface IssueCostSummary {
@@ -52,6 +57,8 @@ export interface CostByAgent {
   agentStatus: string | null;
   costCents: number;
   simulatedCostCents?: number;
+  billableCents?: number;
+  marginCents?: number;
   inputTokens: number;
   cachedInputTokens: number;
   outputTokens: number;
@@ -69,6 +76,8 @@ export interface CostByProviderModel {
   model: string;
   costCents: number;
   simulatedCostCents?: number;
+  billableCents?: number;
+  marginCents?: number;
   inputTokens: number;
   cachedInputTokens: number;
   outputTokens: number;
@@ -83,6 +92,8 @@ export interface CostByBiller {
   biller: string;
   costCents: number;
   simulatedCostCents?: number;
+  billableCents?: number;
+  marginCents?: number;
   inputTokens: number;
   cachedInputTokens: number;
   outputTokens: number;
@@ -105,6 +116,8 @@ export interface CostByAgentModel {
   model: string;
   costCents: number;
   simulatedCostCents?: number;
+  billableCents?: number;
+  marginCents?: number;
   inputTokens: number;
   cachedInputTokens: number;
   outputTokens: number;
@@ -129,6 +142,9 @@ export interface CostByProject {
   projectId: string | null;
   projectName: string | null;
   costCents: number;
+  simulatedCostCents?: number;
+  billableCents?: number;
+  marginCents?: number;
   inputTokens: number;
   cachedInputTokens: number;
   outputTokens: number;

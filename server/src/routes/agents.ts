@@ -4653,6 +4653,12 @@ export function agentRoutes(
     const touchesAdapterConfiguration =
       hasOwn(patchData, "adapterType") ||
       hasOwn(patchData, "adapterConfig");
+    const touchesEnvironmentSelection =
+      hasOwn(patchData, "defaultEnvironmentId") &&
+      patchData.defaultEnvironmentId !== existing.defaultEnvironmentId;
+    if (touchesAdapterConfiguration || touchesEnvironmentSelection) {
+      assertInstanceAdmin(req);
+    }
     if (touchesAdapterConfiguration) {
       assertExternalInstructionsAdmin(req, existing);
       const existingAdapterConfig = asRecord(existing.adapterConfig) ?? {};

@@ -697,7 +697,7 @@ describe.sequential("agent permission routes", () => {
     expect(res.status).toBe(403);
   });
 
-  it("requires instance administration to enable agent-scoped raw provider traces", async () => {
+  it("requires instance administration to modify agent adapter configuration", async () => {
     const app = await createApp({
       type: "board",
       userId: "agent-admin-user",
@@ -708,10 +708,48 @@ describe.sequential("agent permission routes", () => {
 
     const res = await requestApp(app, (baseUrl) => request(baseUrl)
       .patch(`/api/agents/${agentId}`)
-      .send({ runtimeConfig: { debug: { providerTrace: "raw" } } }));
+      .send({ adapterConfig: { model: "claude-3-opus" } }));
 
     expect(res.status).toBe(403);
     expect(mockAgentService.update).not.toHaveBeenCalled();
+  });
+
+  it("requires instance administration to modify agent default environment selection", async () => {
+    const app = await createApp({
+      type: "board",
+      userId: "agent-admin-user",
+      source: "session",
+      isInstanceAdmin: false,
+      companyIds: [companyId],
+    });
+
+    const res = await requestApp(app, (baseUrl) => request(baseUrl)
+      .patch(`/api/agents/${agentId}`)
+      .send({ defaultEnvironmentId: "22222222-2222-4222-8222-222222222222" }));
+
+    expect(res.status).toBe(403);
+    expect(mockAgentService.update).not.toHaveBeenCalled();
+  });
+
+  it("allows non-instance-admin with agent permission to update agent metadata and instructions", async () => {
+    const app = await createApp({
+      type: "board",
+      userId: "agent-admin-user",
+      source: "session",
+      isInstanceAdmin: false,
+      companyIds: [companyId],
+    });
+
+    const res = await requestApp(app, (baseUrl) => request(baseUrl)
+      .patch(`/api/agents/${agentId}`)
+      .send({ title: "Updated Title" }));
+
+    expect(res.status).toBe(200);
+    expect(mockAgentService.update).toHaveBeenCalledWith(
+      agentId,
+      expect.objectContaining({ title: "Updated Title" }),
+      expect.anything(),
+    );
   });
 
   it("allows instance administrators to enable agent-scoped raw provider traces", async () => {

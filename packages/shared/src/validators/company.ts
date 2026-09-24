@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  BILLING_PRICING_MODES,
   COMPANY_STATUSES,
   ISSUE_THREAD_INTERACTION_RESOLVER_POLICIES,
 } from "../constants.js";
@@ -25,6 +26,10 @@ export const createCompanySchema = z.object({
   name: z.string().min(1),
   description: z.string().optional().nullable(),
   budgetMonthlyCents: z.number().int().nonnegative().optional().default(0),
+  billingPricingMode: z.enum(BILLING_PRICING_MODES).optional().default("passthrough"),
+  billingMarkupPercent: z.number().int().min(0).max(1000).optional().default(0),
+  billingByokFeePerMillionCents: z.number().int().nonnegative().optional().default(0),
+  hideInternalCostFromClient: z.boolean().optional().default(false),
   defaultResponsibleUserId: z.string().min(1).nullable().optional(),
 });
 

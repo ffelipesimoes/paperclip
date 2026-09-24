@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { SshRemoteExecutionSpec } from "./ssh.js";
+import { SENSITIVE_HOST_PROVIDER_ENV_KEYS } from "./server-utils.js";
 import {
   prepareCommandManagedRuntime,
   type CommandManagedDuplexChannel,
@@ -2785,6 +2786,12 @@ if ((await isSymbolicLink(sessionDir)) || (await isSymbolicLink(stdinDir))) {
 const childEnv = { ...process.env, ...(config.env || {}) };
 delete childEnv.PAPERCLIP_PROCESS_SESSION_DIR;
 delete childEnv.PAPERCLIP_PROCESS_SESSION_COMMAND_B64;
+for (const key of ${JSON.stringify(SENSITIVE_HOST_PROVIDER_ENV_KEYS)}) {
+  delete childEnv[key];
+}
+if (config.env) {
+  Object.assign(childEnv, config.env);
+}
 
 // I1: exactly one child process per emitted wrapper. Do not add a second
 // tracked child handle.
@@ -2876,6 +2883,12 @@ if ((await isSymbolicLink(sessionDir)) || (await isSymbolicLink(stdinDir))) {
 const childEnv = { ...process.env, ...(config.env || {}) };
 delete childEnv.PAPERCLIP_PROCESS_SESSION_DIR;
 delete childEnv.PAPERCLIP_PROCESS_SESSION_COMMAND_B64;
+for (const key of ${JSON.stringify(SENSITIVE_HOST_PROVIDER_ENV_KEYS)}) {
+  delete childEnv[key];
+}
+if (config.env) {
+  Object.assign(childEnv, config.env);
+}
 
 // I1: exactly one child process per emitted wrapper. Do not add a second
 // tracked child handle.

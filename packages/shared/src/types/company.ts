@@ -1,4 +1,5 @@
 import type {
+  BillingPricingMode,
   CompanyStatus,
   IssueThreadInteractionKind,
   IssueThreadInteractionResolverPolicy,
@@ -25,6 +26,10 @@ export interface Company {
   issueCounter: number;
   budgetMonthlyCents: number;
   spentMonthlyCents: number;
+  billingPricingMode: BillingPricingMode;
+  billingMarkupPercent: number;
+  billingByokFeePerMillionCents: number;
+  hideInternalCostFromClient: boolean;
   defaultResponsibleUserId: string | null;
   requireBoardApprovalForNewAgents: boolean;
   interactionResolverGovernance: InteractionResolverGovernance;
