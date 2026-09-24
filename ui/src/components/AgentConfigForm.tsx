@@ -464,6 +464,8 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
           ...nextOverlay,
           adapterType: undefined,
           adapterConfig: {},
+          heartbeat: {},
+          debug: {},
           identity: {
             ...nextOverlay.identity,
             defaultEnvironmentId: undefined,

@@ -22,6 +22,8 @@ describe("sanitizeInheritedPaperclipEnv", () => {
       AWS_SECRET_ACCESS_KEY: "host-aws-secret",
       AWS_SESSION_TOKEN: "host-session-token",
       CURSOR_API_KEY: "host-cursor-key",
+      CLAUDE_CONFIG_DIR: "/Users/host/.claude",
+      CODEX_HOME: "/Users/host/.codex",
       PATH: "/usr/bin",
     })).toEqual({
       PATH: "/usr/bin",

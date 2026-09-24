@@ -44,7 +44,7 @@ import {
 } from "../services/index.js";
 import { environmentService } from "../services/environments.js";
 import { assertEnvironmentSelectionForCompany } from "./environment-selection.js";
-import { assertBoardOrgAccess, getActorInfo } from "./authz.js";
+import { assertBoardOrgAccess, assertInstanceAdmin, getActorInfo } from "./authz.js";
 
 function sameJsonValue(a: unknown, b: unknown): boolean {
   if (a === b) return true;
@@ -102,17 +102,7 @@ function publishActivitiesBestEffort(publications: ActivityPublication[], action
 }
 
 function assertCanManageInstanceSettings(req: Request) {
-  if (req.actor.type !== "board") {
-    throw forbidden("Board access required");
-  }
-  if (
-    req.actor.source === "local_implicit" ||
-    req.actor.isInstanceAdmin ||
-    req.actor.memberships?.some((m) => m.membershipRole === "owner" || m.membershipRole === "admin")
-  ) {
-    return;
-  }
-  throw forbidden("Instance admin access required");
+  assertInstanceAdmin(req);
 }
 
 // A task-drain start or stop reads the live drain state, writes an audit
