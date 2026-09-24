@@ -36,6 +36,7 @@ const localIcons = {
   permissions: ShieldCheck,
   "api-keys": KeyRound,
   revisions: History,
+  budget: BadgeDollarSign,
 } satisfies Record<AgentLocalDetailView, typeof Sparkles>;
 
 const auditItems = [

@@ -58,6 +58,9 @@ import { formatDate, relativeTime, formatTokens, visibleRunCostUsd, simulatedRun
 import { cn } from "../lib/utils";
 import { describeRunRetryState } from "../lib/runRetryState";
 import { Button } from "@/components/ui/button";
+import { budgetsApi } from "../api/budgets";
+import { BudgetPolicyCard } from "../components/BudgetPolicyCard";
+import type { BudgetPolicySummary } from "@paperclipai/shared";
 import { Tabs } from "@/components/ui/tabs";
 import { PageTabBar } from "../components/PageTabBar";
 import { AuditFeed } from "./audit/AuditFeed";
@@ -955,6 +958,62 @@ export function AgentDetail() {
     [heartbeats],
   );
 
+  const { data: budgetOverview } = useQuery({
+    queryKey: queryKeys.budgets.overview(resolvedCompanyId ?? "__none__"),
+    queryFn: () => budgetsApi.overview(resolvedCompanyId!),
+    enabled: Boolean(resolvedCompanyId),
+  });
+
+  const agentBudgetSummary = useMemo(() => {
+    const matched = budgetOverview?.policies.find(
+      (policy) => policy.scopeType === "agent" && policy.scopeId === (agent?.id ?? routeAgentRef),
+    );
+    if (matched) return matched;
+    const budgetMonthlyCents = agent?.budgetMonthlyCents ?? 0;
+    const spentMonthlyCents = agent?.spentMonthlyCents ?? 0;
+    return {
+      policyId: "",
+      companyId: resolvedCompanyId ?? "",
+      scopeType: "agent",
+      scopeId: agent?.id ?? routeAgentRef,
+      scopeName: agent?.name ?? "Agent",
+      metric: "billed_cents",
+      windowKind: "calendar_month_utc",
+      amount: budgetMonthlyCents,
+      observedAmount: spentMonthlyCents,
+      remainingAmount: Math.max(0, budgetMonthlyCents - spentMonthlyCents),
+      utilizationPercent:
+        budgetMonthlyCents > 0 ? Number(((spentMonthlyCents / budgetMonthlyCents) * 100).toFixed(2)) : 0,
+      warnPercent: 80,
+      hardStopEnabled: true,
+      notifyEnabled: true,
+      isActive: budgetMonthlyCents > 0,
+      status: budgetMonthlyCents > 0 && spentMonthlyCents >= budgetMonthlyCents ? "hard_stop" : "ok",
+      paused: agent?.status === "paused",
+      pauseReason: agent?.pauseReason ?? null,
+      windowStart: new Date(),
+      windowEnd: new Date(),
+    } satisfies BudgetPolicySummary;
+  }, [agent, budgetOverview?.policies, resolvedCompanyId, routeAgentRef]);
+
+  const budgetMutation = useMutation({
+    mutationFn: (amount: number) =>
+      budgetsApi.upsertPolicy(resolvedCompanyId!, {
+        scopeType: "agent",
+        scopeId: agent?.id ?? routeAgentRef,
+        amount,
+        windowKind: "calendar_month_utc",
+      }),
+    onSuccess: () => {
+      if (!resolvedCompanyId) return;
+      queryClient.invalidateQueries({ queryKey: queryKeys.budgets.overview(resolvedCompanyId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(routeAgentRef) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agentLookupRef) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(resolvedCompanyId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboard(resolvedCompanyId) });
+    },
+  });
+
   useEffect(() => {
     if (!agent) return;
     if (urlRunId) {
@@ -1538,6 +1597,17 @@ export function AgentDetail() {
         <AgentRevisionsTab agent={agent} companyId={resolvedCompanyId ?? undefined} />
       )}
 
+      {activeView === "budget" && resolvedCompanyId ? (
+        <div className="max-w-3xl">
+          <BudgetPolicyCard
+            summary={agentBudgetSummary}
+            isSaving={budgetMutation.isPending}
+            onSave={(amount) => budgetMutation.mutate(amount)}
+            variant="plain"
+          />
+        </div>
+      ) : null}
+
       {activeView === "run-detail" && (
         <RunsTab
           runs={heartbeats ?? []}
@@ -1566,15 +1636,14 @@ export function AgentDetail() {
         <AuditFeed companyId={resolvedCompanyId} lockedAgentId={agent.id} />
       ) : null}
 
-      {!streamlinedUiEnabled && (legacyAuditSection === "costs" || legacyAuditSection === "budgets") ? (
-        <div className="space-y-3">
-          <h3 className="text-lg font-semibold">Agent budget</h3>
-          <p className="text-sm text-muted-foreground">
-            Review this agent&apos;s budget policy and spend in the organization costs view.
-          </p>
-          <Button variant="outline" asChild>
-            <Link to="/costs">Open costs and budgets</Link>
-          </Button>
+      {!streamlinedUiEnabled && (legacyAuditSection === "costs" || legacyAuditSection === "budgets") && resolvedCompanyId ? (
+        <div className="max-w-3xl">
+          <BudgetPolicyCard
+            summary={agentBudgetSummary}
+            isSaving={budgetMutation.isPending}
+            onSave={(amount) => budgetMutation.mutate(amount)}
+            variant="plain"
+          />
         </div>
       ) : null}
     </div>
@@ -3174,10 +3243,8 @@ function RunListItem({ run, isSelected, agentId }: { run: HeartbeatRun; isSelect
       {(metrics.totalTokens > 0 || metrics.cost > 0 || metrics.simulatedCost > 0) && (
         <div className="flex items-center gap-2 pl-5.5 text-(length:--text-micro) text-muted-foreground tabular-nums">
           {metrics.totalTokens > 0 && <span>{formatTokens(metrics.totalTokens)} tok</span>}
-          {metrics.cost > 0 ? (
-            <span>${metrics.cost.toFixed(3)}</span>
-          ) : metrics.simulatedCost > 0 ? (
-            <span title="Simulated cost based on token pricing">$0.00 (sim. ${metrics.simulatedCost.toFixed(3)})</span>
+          {metrics.cost > 0 || metrics.simulatedCost > 0 ? (
+            <span>${(metrics.cost > 0 ? metrics.cost : metrics.simulatedCost).toFixed(3)}</span>
           ) : null}
         </div>
       )}
@@ -3732,7 +3799,7 @@ function RunDetail({ run: initialRun, agentRouteId, adapterType, adapterConfig }
                   {metrics.cost > 0
                     ? `$${metrics.cost.toFixed(4)}`
                     : metrics.simulatedCost > 0
-                      ? `$0.00 (sim. $${metrics.simulatedCost.toFixed(4)})`
+                      ? `$${metrics.simulatedCost.toFixed(4)}`
                       : "-"}
                 </div>
               </div>
