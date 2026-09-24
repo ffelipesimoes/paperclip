@@ -123,6 +123,10 @@ export const companiesApi = {
         | "interactionResolverGovernance"
         | "feedbackDataSharingEnabled"
         | "logoAssetId"
+        | "billingPricingMode"
+        | "billingMarkupPercent"
+        | "billingByokFeePerMillionCents"
+        | "hideInternalCostFromClient"
       >
     >,
   ) => api.patch<Company>(`/companies/${companyId}`, data),

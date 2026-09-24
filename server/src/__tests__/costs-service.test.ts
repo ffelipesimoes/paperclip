@@ -1001,5 +1001,65 @@ describeEmbeddedPostgres("cost and finance aggregate overflow handling", () => {
     expect(agentModelCosts[0].costCents).toBe(0);
     expect(agentModelCosts[0].simulatedCostCents).toBe(600);
   });
+
+  it("calculates billable costs and margin according to company pricing mode and respects hideInternalCostFromClient", async () => {
+    const companyId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Monetized Client Co",
+      issuePrefix: `M${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+      billingPricingMode: "simulated_markup",
+      billingMarkupPercent: 30, // 30% markup on simulated token value
+      hideInternalCostFromClient: true,
+    });
+
+    const agent = await db
+      .insert(agents)
+      .values({
+        companyId,
+        name: "Monetized Agent",
+        status: "idle",
+        adapterType: "claude_local",
+      })
+      .returning()
+      .then((rows) => rows[0]);
+
+    // Use createEvent from costs service which computes simulatedCostCents and billableCents based on company pricing
+    await costs.createEvent(companyId, {
+      agentId: agent.id,
+      provider: "anthropic",
+      biller: "anthropic",
+      billingType: "subscription_included",
+      model: "claude-3-5-sonnet",
+      inputTokens: 1_000_000,
+      cachedInputTokens: 0,
+      outputTokens: 200_000,
+      costCents: 0, // $0 marginal cost for subscription
+      occurredAt: new Date("2026-04-10T00:00:00.000Z"),
+    });
+
+    const range = {
+      from: new Date("2026-04-01T00:00:00.000Z"),
+      to: new Date("2026-04-30T23:59:59.999Z"),
+    };
+
+    const summary = await costs.summary(companyId, range);
+    expect(summary.spendCents).toBe(0);
+    expect(summary.simulatedCostCents).toBe(600); // 1M @ $3 + 200k @ $15/M ($3) = 600 cents ($6.00)
+    // 30% markup on 600 = Math.round(600 * 1.30) = 780 cents ($7.80)
+    expect(summary.billableCents).toBe(780);
+    // Margin is billable (780) - real spend (0) = 780 cents
+    expect(summary.marginCents).toBe(780);
+    expect(summary.hideInternalCostFromClient).toBe(true);
+
+    const agentCosts = await costs.byAgent(companyId, range);
+    expect(agentCosts).toHaveLength(1);
+    expect(agentCosts[0].costCents).toBe(0);
+    expect(agentCosts[0].simulatedCostCents).toBe(600);
+    expect(agentCosts[0].billableCents).toBe(780);
+    expect(agentCosts[0].marginCents).toBe(780);
+  });
 });
 

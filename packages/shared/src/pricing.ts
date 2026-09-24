@@ -1,3 +1,5 @@
+import type { BillingPricingMode } from "./constants.js";
+
 export interface ModelPricing {
   inputPerMillionUsd: number;
   cachedInputPerMillionUsd: number;
@@ -89,3 +91,42 @@ export function simulateCacheSavingsCents(input: {
   const savingsUsd = (cachedTokens / 1_000_000) * diffPerMillion;
   return Math.round(savingsUsd * 100);
 }
+
+export function calculateBillableCents(input: {
+  costCents: number;
+  simulatedCostCents: number;
+  inputTokens: number;
+  cachedInputTokens?: number;
+  outputTokens: number;
+  pricingMode?: BillingPricingMode | null;
+  markupPercent?: number | null;
+  byokFeePerMillionCents?: number | null;
+}): number {
+  const mode = input.pricingMode ?? "passthrough";
+  const costCents = Math.max(0, input.costCents);
+  const simulatedCostCents = Math.max(0, input.simulatedCostCents);
+  const markupPercent = Math.max(0, input.markupPercent ?? 0);
+
+  switch (mode) {
+    case "simulated_markup": {
+      const base = simulatedCostCents > 0 ? simulatedCostCents : costCents;
+      return Math.round(base * (1 + markupPercent / 100));
+    }
+    case "fixed_markup": {
+      return Math.round(costCents * (1 + markupPercent / 100));
+    }
+    case "byok_fee": {
+      const totalTokens =
+        Math.max(0, input.inputTokens) +
+        Math.max(0, input.cachedInputTokens ?? 0) +
+        Math.max(0, input.outputTokens);
+      const feePerMillion = Math.max(0, input.byokFeePerMillionCents ?? 0);
+      const feeCents = Math.round((totalTokens / 1_000_000) * feePerMillion);
+      return costCents + feeCents;
+    }
+    case "passthrough":
+    default:
+      return costCents;
+  }
+}
+

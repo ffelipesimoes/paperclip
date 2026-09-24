@@ -63,6 +63,10 @@ function makeCompany(id: string): Company {
     feedbackDataSharingTermsVersion: null,
     logoAssetId: null,
     logoUrl: null,
+    billingPricingMode: "passthrough",
+    billingMarkupPercent: 0,
+    billingByokFeePerMillionCents: 0,
+    hideInternalCostFromClient: false,
     createdAt: new Date(),
     updatedAt: new Date(),
   };

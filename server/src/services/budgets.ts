@@ -252,12 +252,19 @@ async function resolveScopeRecord(db: Db, scopeType: BudgetScopeType, scopeId: s
   };
 }
 
+function getMetricColumn(metric: string) {
+  if (metric === "simulated_cents") return costEvents.simulatedCostCents;
+  if (metric === "billable_cents") return costEvents.billableCents;
+  return costEvents.costCents;
+}
+
 async function computeObservedAmount(
   db: Db,
   policy: Pick<PolicyRow, "companyId" | "scopeType" | "scopeId" | "windowKind" | "metric">,
 ) {
-  if (policy.metric !== "billed_cents") return 0;
+  if (!["billed_cents", "simulated_cents", "billable_cents"].includes(policy.metric)) return 0;
 
+  const column = getMetricColumn(policy.metric);
   const conditions = [eq(costEvents.companyId, policy.companyId)];
   if (policy.scopeType === "agent") conditions.push(eq(costEvents.agentId, policy.scopeId));
   if (policy.scopeType === "project") conditions.push(eq(costEvents.projectId, policy.scopeId));
@@ -269,7 +276,7 @@ async function computeObservedAmount(
 
   const [row] = await db
     .select({
-      total: sql<number>`coalesce(sum(${costEvents.costCents}), 0)::double precision`,
+      total: sql<number>`coalesce(sum(${column}), 0)::double precision`,
     })
     .from(costEvents)
     .where(and(...conditions));
@@ -285,41 +292,46 @@ async function computeObservedAmountsBatch(
   if (policies.length === 0) return result;
 
   for (const p of policies) {
-    if (p.metric !== "billed_cents") {
+    if (!["billed_cents", "simulated_cents", "billable_cents"].includes(p.metric)) {
       result.set(p.id, 0);
     }
   }
 
-  const relevantPolicies = policies.filter((p) => p.metric === "billed_cents");
+  const relevantPolicies = policies.filter((p) =>
+    ["billed_cents", "simulated_cents", "billable_cents"].includes(p.metric),
+  );
   if (relevantPolicies.length === 0) return result;
 
-  const byWindow = new Map<BudgetWindowKind, typeof relevantPolicies>();
+  const byGroup = new Map<string, typeof relevantPolicies>();
   for (const p of relevantPolicies) {
-    const windowKind = p.windowKind as BudgetWindowKind;
-    const list = byWindow.get(windowKind) ?? [];
+    const key = `${p.metric}:${p.windowKind}`;
+    const list = byGroup.get(key) ?? [];
     list.push(p);
-    byWindow.set(windowKind, list);
+    byGroup.set(key, list);
   }
 
   const queries: Promise<void>[] = [];
 
-  for (const [windowKind, windowPolicies] of byWindow.entries()) {
+  for (const [key, groupPolicies] of byGroup.entries()) {
+    const [metric, windowKindStr] = key.split(":");
+    const windowKind = windowKindStr as BudgetWindowKind;
+    const column = getMetricColumn(metric);
     const { start, end } = resolveWindow(windowKind);
     const timeConditions =
       windowKind === "calendar_month_utc"
         ? [gte(costEvents.occurredAt, start), lt(costEvents.occurredAt, end)]
         : [];
 
-    const companyPolicies = windowPolicies.filter((p) => p.scopeType === "company");
-    const agentPolicies = windowPolicies.filter((p) => p.scopeType === "agent");
-    const projectPolicies = windowPolicies.filter((p) => p.scopeType === "project");
+    const companyPolicies = groupPolicies.filter((p) => p.scopeType === "company");
+    const agentPolicies = groupPolicies.filter((p) => p.scopeType === "agent");
+    const projectPolicies = groupPolicies.filter((p) => p.scopeType === "project");
 
     if (companyPolicies.length > 0) {
       const companyId = companyPolicies[0].companyId;
       queries.push(
         db
           .select({
-            total: sql<number>`coalesce(sum(${costEvents.costCents}), 0)::double precision`,
+            total: sql<number>`coalesce(sum(${column}), 0)::double precision`,
           })
           .from(costEvents)
           .where(and(eq(costEvents.companyId, companyId), ...timeConditions))
@@ -339,7 +351,7 @@ async function computeObservedAmountsBatch(
         db
           .select({
             agentId: costEvents.agentId,
-            total: sql<number>`coalesce(sum(${costEvents.costCents}), 0)::double precision`,
+            total: sql<number>`coalesce(sum(${column}), 0)::double precision`,
           })
           .from(costEvents)
           .where(and(eq(costEvents.companyId, companyId), inArray(costEvents.agentId, agentIds), ...timeConditions))
@@ -360,7 +372,7 @@ async function computeObservedAmountsBatch(
         db
           .select({
             projectId: costEvents.projectId,
-            total: sql<number>`coalesce(sum(${costEvents.costCents}), 0)::double precision`,
+            total: sql<number>`coalesce(sum(${column}), 0)::double precision`,
           })
           .from(costEvents)
           .where(and(eq(costEvents.companyId, companyId), inArray(costEvents.projectId, projectIds), ...timeConditions))
@@ -946,7 +958,7 @@ export function budgetService(db: Db, hooks: BudgetServiceHooks = {}) {
       });
 
       for (const policy of relevantPolicies) {
-        if (policy.metric !== "billed_cents" || policy.amount <= 0) continue;
+        if (!["billed_cents", "simulated_cents", "billable_cents"].includes(policy.metric) || policy.amount <= 0) continue;
         const observedAmount = await computeObservedAmount(db, policy);
         const softThreshold = Math.ceil((policy.amount * policy.warnPercent) / 100);
 
@@ -1034,7 +1046,7 @@ export function budgetService(db: Db, hooks: BudgetServiceHooks = {}) {
         };
       }
 
-      const companyPolicy = await db
+      const companyPolicies = await db
         .select()
         .from(budgetPolicies)
         .where(
@@ -1043,19 +1055,20 @@ export function budgetService(db: Db, hooks: BudgetServiceHooks = {}) {
             eq(budgetPolicies.scopeType, "company"),
             eq(budgetPolicies.scopeId, companyId),
             eq(budgetPolicies.isActive, true),
-            eq(budgetPolicies.metric, "billed_cents"),
+            inArray(budgetPolicies.metric, ["billed_cents", "simulated_cents", "billable_cents"]),
           ),
-        )
-        .then((rows) => rows[0] ?? null);
-      if (companyPolicy && companyPolicy.hardStopEnabled && companyPolicy.amount > 0) {
-        const observed = await computeObservedAmount(db, companyPolicy);
-        if (observed >= companyPolicy.amount) {
-          return {
-            scopeType: "company" as const,
-            scopeId: companyId,
-            scopeName: company.name,
-            reason: "Company cannot start new work because its budget hard-stop is exceeded.",
-          };
+        );
+      for (const companyPolicy of companyPolicies) {
+        if (companyPolicy.hardStopEnabled && companyPolicy.amount > 0) {
+          const observed = await computeObservedAmount(db, companyPolicy);
+          if (observed >= companyPolicy.amount) {
+            return {
+              scopeType: "company" as const,
+              scopeId: companyId,
+              scopeName: company.name,
+              reason: "Company cannot start new work because its budget hard-stop is exceeded.",
+            };
+          }
         }
       }
 
@@ -1068,7 +1081,7 @@ export function budgetService(db: Db, hooks: BudgetServiceHooks = {}) {
         };
       }
 
-      const agentPolicy = await db
+      const agentPolicies = await db
         .select()
         .from(budgetPolicies)
         .where(
@@ -1077,19 +1090,20 @@ export function budgetService(db: Db, hooks: BudgetServiceHooks = {}) {
             eq(budgetPolicies.scopeType, "agent"),
             eq(budgetPolicies.scopeId, agentId),
             eq(budgetPolicies.isActive, true),
-            eq(budgetPolicies.metric, "billed_cents"),
+            inArray(budgetPolicies.metric, ["billed_cents", "simulated_cents", "billable_cents"]),
           ),
-        )
-        .then((rows) => rows[0] ?? null);
-      if (agentPolicy && agentPolicy.hardStopEnabled && agentPolicy.amount > 0) {
-        const observed = await computeObservedAmount(db, agentPolicy);
-        if (observed >= agentPolicy.amount) {
-          return {
-            scopeType: "agent" as const,
-            scopeId: agentId,
-            scopeName: agent.name,
-            reason: "Agent cannot start because its budget hard-stop is still exceeded.",
-          };
+        );
+      for (const agentPolicy of agentPolicies) {
+        if (agentPolicy.hardStopEnabled && agentPolicy.amount > 0) {
+          const observed = await computeObservedAmount(db, agentPolicy);
+          if (observed >= agentPolicy.amount) {
+            return {
+              scopeType: "agent" as const,
+              scopeId: agentId,
+              scopeName: agent.name,
+              reason: "Agent cannot start because its budget hard-stop is still exceeded.",
+            };
+          }
         }
       }
 
@@ -1109,7 +1123,7 @@ export function budgetService(db: Db, hooks: BudgetServiceHooks = {}) {
         .then((rows) => rows[0] ?? null);
 
       if (!project || project.companyId !== companyId) return null;
-      const projectPolicy = await db
+      const projectPolicies = await db
         .select()
         .from(budgetPolicies)
         .where(
@@ -1118,19 +1132,20 @@ export function budgetService(db: Db, hooks: BudgetServiceHooks = {}) {
             eq(budgetPolicies.scopeType, "project"),
             eq(budgetPolicies.scopeId, project.id),
             eq(budgetPolicies.isActive, true),
-            eq(budgetPolicies.metric, "billed_cents"),
+            inArray(budgetPolicies.metric, ["billed_cents", "simulated_cents", "billable_cents"]),
           ),
-        )
-        .then((rows) => rows[0] ?? null);
-      if (projectPolicy && projectPolicy.hardStopEnabled && projectPolicy.amount > 0) {
-        const observed = await computeObservedAmount(db, projectPolicy);
-        if (observed >= projectPolicy.amount) {
-          return {
-            scopeType: "project" as const,
-            scopeId: project.id,
-            scopeName: project.name,
-            reason: "Project cannot start work because its budget hard-stop is still exceeded.",
-          };
+        );
+      for (const projectPolicy of projectPolicies) {
+        if (projectPolicy.hardStopEnabled && projectPolicy.amount > 0) {
+          const observed = await computeObservedAmount(db, projectPolicy);
+          if (observed >= projectPolicy.amount) {
+            return {
+              scopeType: "project" as const,
+              scopeId: project.id,
+              scopeName: project.name,
+              reason: "Project cannot start work because its budget hard-stop is still exceeded.",
+            };
+          }
         }
       }
 

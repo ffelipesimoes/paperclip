@@ -122,6 +122,8 @@ type AgentConfigFormProps = {
   hideInstructionsFile?: boolean;
   /** Allow instance administrators to configure short-lived raw provider capture. */
   canConfigureProviderTrace?: boolean;
+  /** Allow instance administrators to configure agent adapter type and adapter settings. */
+  canConfigureAdapter?: boolean;
   /** Hide the prompt template field from the Identity section (used when it's shown in a separate Prompts tab). */
   hidePromptTemplate?: boolean;
   /** Render the main configuration sections or the dedicated edit-only Secrets surface. */
@@ -260,6 +262,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
   const showCreateRunPolicySection = props.showCreateRunPolicySection ?? true;
   const hideInstructionsFile = props.hideInstructionsFile ?? false;
   const canConfigureProviderTrace = props.canConfigureProviderTrace === true;
+  const canConfigureAdapter = props.canConfigureAdapter ?? true;
   const { selectedCompanyId } = useCompany();
   const queryClient = useQueryClient();
   const environmentVariablesEditorRef = useRef<EnvironmentVariablesEditorHandle | null>(null);
@@ -455,9 +458,20 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
           },
         }
       : overlay;
-    if (!isOverlayDirty(nextOverlay)) return;
-    await props.onSave(buildAgentUpdatePatch(props.agent, nextOverlay));
-  }, [isCreate, isDirty, overlay, props]);
+    const sanitizedOverlay = canConfigureAdapter
+      ? nextOverlay
+      : {
+          ...nextOverlay,
+          adapterType: undefined,
+          adapterConfig: {},
+          identity: {
+            ...nextOverlay.identity,
+            defaultEnvironmentId: undefined,
+          },
+        };
+    if (!isOverlayDirty(sanitizedOverlay)) return;
+    await props.onSave(buildAgentUpdatePatch(props.agent, sanitizedOverlay));
+  }, [isCreate, isDirty, overlay, props, canConfigureAdapter]);
 
   useEffect(() => {
     if (!isCreate) {
@@ -1329,7 +1343,8 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
             <Field label="Environment override">
               <div className="space-y-2">
                 <select
-                  className={inputClass}
+                  disabled={!canConfigureAdapter}
+                  className={cn(inputClass, !canConfigureAdapter && "opacity-60 cursor-not-allowed")}
                   value={currentDefaultEnvironmentId}
                   onChange={(event) => {
                     const nextValue = event.target.value;
@@ -1347,6 +1362,11 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                     </option>
                   ))}
                 </select>
+                {!canConfigureAdapter && (
+                  <p className="text-xs text-muted-foreground">
+                    Environment selection is managed by instance administrators.
+                  </p>
+                )}
               </div>
             </Field>
           </div>
@@ -1374,11 +1394,17 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
           )}
         </div>
         <div className={cn(cards ? "border border-border rounded-lg p-4 space-y-3" : "px-4 pb-3 space-y-3")}>
+          {!canConfigureAdapter && (
+            <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              Adapter configuration is managed by the instance administrator. Non-admin users cannot modify adapter settings.
+            </div>
+          )}
           {showAdapterTypeField && (
             <Field label="Adapter type" hint={help.adapterType}>
               <AdapterTypeDropdown
                 value={adapterType}
                 disabledTypes={adapterPickerDisabledTypes}
+                disabled={!canConfigureAdapter}
                 onChange={(t) => {
                   if (isCreate) {
                     // Reset all adapter-specific fields to defaults when switching adapter type
@@ -1523,6 +1549,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
               {!hideHostPaths && (
                 <Field label="Command" hint={help.localCommand}>
                   <DraftInput
+                    disabled={!canConfigureAdapter}
                     value={
                       isCreate
                         ? val!.command
@@ -1540,7 +1567,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                         : mark("adapterConfig", adapterCommandField, v || null)
                     }
                     immediate
-                    className={inputClass}
+                    className={cn(inputClass, !canConfigureAdapter && "opacity-60 cursor-not-allowed")}
                     placeholder={
                       ({
                         claude_local: "claude",
@@ -1557,6 +1584,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
               )}
 
               <ModelDropdown
+                disabled={!canConfigureAdapter}
                 models={models}
                 value={currentModelId}
                 onChange={(v) => {
@@ -1619,6 +1647,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
               {showThinkingEffort && (
                 <>
                   <ThinkingEffortDropdown
+                    disabled={!canConfigureAdapter}
                     value={currentThinkingEffort}
                     options={thinkingEffortOptions}
                     onChange={(v) =>
@@ -3100,10 +3129,12 @@ export function AdapterTypeDropdown({
   value,
   onChange,
   disabledTypes,
+  disabled = false,
 }: {
   value: string;
   onChange: (type: string) => void;
   disabledTypes: Set<string>;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const selectedDisplay = getAdapterDisplay(value);
@@ -3116,9 +3147,16 @@ export function AdapterTypeDropdown({
   );
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={disabled ? false : open} onOpenChange={disabled ? undefined : setOpen}>
       <PopoverTrigger asChild>
-        <button className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-sm hover:bg-accent/50 transition-colors w-full justify-between">
+        <button
+          type="button"
+          disabled={disabled}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-sm hover:bg-accent/50 transition-colors w-full justify-between",
+            disabled && "opacity-60 cursor-not-allowed hover:bg-transparent",
+          )}
+        >
           <span className="inline-flex min-w-0 items-center gap-1.5">
             {value === "opencode_local" ? <OpenCodeLogoIcon className="h-3.5 w-3.5" /> : null}
             <span className="truncate">{adapterLabels[value] ?? getAdapterLabel(value)}</span>
@@ -3187,6 +3225,7 @@ export function ModelDropdown({
   detectModelLabel,
   emptyDetectHint,
   defaultLabel,
+  disabled = false,
 }: {
   models: AdapterModel[];
   value: string;
@@ -3205,6 +3244,7 @@ export function ModelDropdown({
   detectModelLabel?: string;
   emptyDetectHint?: string;
   defaultLabel?: string;
+  disabled?: boolean;
 }) {
   const [modelSearch, setModelSearch] = useState("");
   const [detectingModel, setDetectingModel] = useState(false);
@@ -3280,14 +3320,22 @@ export function ModelDropdown({
   return (
     <Field label="Model" hint={help.model}>
       <Popover
-        open={open}
+        open={disabled ? false : open}
         onOpenChange={(nextOpen) => {
+          if (disabled) return;
           onOpenChange(nextOpen);
           if (!nextOpen) setModelSearch("");
         }}
       >
         <PopoverTrigger asChild>
-          <button type="button" className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-sm hover:bg-accent/50 transition-colors w-full justify-between">
+          <button
+            type="button"
+            disabled={disabled}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-sm hover:bg-accent/50 transition-colors w-full justify-between",
+              disabled && "opacity-60 cursor-not-allowed hover:bg-transparent",
+            )}
+          >
             <span className={cn(!value && "text-muted-foreground")}>
               {selected
                 ? selected.label
@@ -3494,20 +3542,29 @@ function ThinkingEffortDropdown({
   onChange,
   open,
   onOpenChange,
+  disabled = false,
 }: {
   value: string;
   options: ReadonlyArray<{ id: string; label: string }>;
   onChange: (id: string) => void;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  disabled?: boolean;
 }) {
   const selected = options.find((option) => option.id === value) ?? options[0];
 
   return (
     <Field label="Thinking effort" hint={help.thinkingEffort}>
-      <Popover open={open} onOpenChange={onOpenChange}>
+      <Popover open={disabled ? false : open} onOpenChange={disabled ? undefined : onOpenChange}>
         <PopoverTrigger asChild>
-          <button className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-sm hover:bg-accent/50 transition-colors w-full justify-between">
+          <button
+            type="button"
+            disabled={disabled}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-sm hover:bg-accent/50 transition-colors w-full justify-between",
+              disabled && "opacity-60 cursor-not-allowed hover:bg-transparent",
+            )}
+          >
             <span className={cn(!value && "text-muted-foreground")}>{selected?.label ?? "Auto"}</span>
             <ChevronDown className="h-3 w-3 text-muted-foreground" />
           </button>

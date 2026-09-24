@@ -46,6 +46,7 @@ import {
   type SourceTrustMetadata,
   simulateCostCents,
   simulateCostUsd,
+  calculateBillableCents,
 } from "@paperclipai/shared";
 import {
   agents,
@@ -17536,6 +17537,35 @@ export function heartbeatService(
       .where(eq(agentRuntimeState.agentId, agent.id));
 
     if (additionalCostCents > 0 || hasTokenUsage) {
+      const companyRow = await db
+        .select({
+          billingPricingMode: companies.billingPricingMode,
+          billingMarkupPercent: companies.billingMarkupPercent,
+          billingByokFeePerMillionCents: companies.billingByokFeePerMillionCents,
+        })
+        .from(companies)
+        .where(eq(companies.id, agent.companyId))
+        .then((rows) => rows[0] ?? null);
+
+      const simulatedCostCents = simulateCostCents({
+        model: result.model ?? "unknown",
+        provider,
+        inputTokens,
+        cachedInputTokens,
+        outputTokens,
+      });
+
+      const billableCents = calculateBillableCents({
+        costCents: additionalCostCents,
+        simulatedCostCents,
+        inputTokens,
+        cachedInputTokens,
+        outputTokens,
+        pricingMode: (companyRow?.billingPricingMode as any) ?? "passthrough",
+        markupPercent: companyRow?.billingMarkupPercent ?? 0,
+        byokFeePerMillionCents: companyRow?.billingByokFeePerMillionCents ?? 0,
+      });
+
       const costs = costService(db, budgetHooks);
       await costs.createEvent(agent.companyId, {
         heartbeatRunId: run.id,
@@ -17552,6 +17582,8 @@ export function heartbeatService(
         cachedInputTokens,
         outputTokens,
         costCents: additionalCostCents,
+        simulatedCostCents,
+        billableCents,
         occurredAt: new Date(),
       });
     }

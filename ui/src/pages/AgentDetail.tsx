@@ -823,6 +823,7 @@ export function AgentDetail() {
   const canUseProviderTrace =
     boardAccess?.source === "local_implicit" ||
     boardAccess?.isInstanceAdmin === true;
+  const canConfigureAdapter = canUseProviderTrace;
   const membershipsQuery = useResourceMemberships(resolvedCompanyId);
   const membershipMutation = useResourceMembershipMutation(resolvedCompanyId);
   const agentMembershipState = resolvedAgentId
@@ -1477,6 +1478,7 @@ export function AgentDetail() {
             onSavingChange={setConfigSaving}
             updatePermissions={updatePermissions}
             canConfigureProviderTrace={canUseProviderTrace}
+            canConfigureAdapter={canConfigureAdapter}
             content="runtime"
             hidePromptTemplate
             hideInstructionsFile
@@ -1494,6 +1496,7 @@ export function AgentDetail() {
             onCancelActionChange={setCancelConfigAction}
             onSavingChange={setConfigSaving}
             updatePermissions={updatePermissions}
+            canConfigureAdapter={canConfigureAdapter}
             content="secrets"
           />
         </div>
@@ -2019,6 +2022,7 @@ function ConfigurationTab({
   hideInstructionsFile,
   content = "runtime",
   canConfigureProviderTrace = false,
+  canConfigureAdapter = true,
 }: {
   agent: AgentDetailRecord;
   companyId?: string;
@@ -2031,6 +2035,7 @@ function ConfigurationTab({
   hideInstructionsFile?: boolean;
   content?: "runtime" | "permissions" | "secrets";
   canConfigureProviderTrace?: boolean;
+  canConfigureAdapter?: boolean;
 }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -2142,6 +2147,7 @@ function ConfigurationTab({
         content={content === "runtime" ? "configuration" : "secrets"}
         sectionLayout="cards"
         canConfigureProviderTrace={canConfigureProviderTrace}
+        canConfigureAdapter={canConfigureAdapter}
       /> : null}
       {content === "runtime" ? (
         <p className="text-xs text-muted-foreground">

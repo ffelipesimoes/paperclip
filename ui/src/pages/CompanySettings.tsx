@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   type InteractionResolverGovernance,
   type IssueThreadInteractionKind,
+  type BillingPricingMode,
 } from "@paperclipai/shared";
 import { useCompany } from "../context/CompanyContext";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
@@ -44,6 +45,12 @@ export function CompanySettings() {
   const [logoUploadError, setLogoUploadError] = useState<string | null>(null);
   const [governance, setGovernance] = useState<InteractionResolverGovernance>({});
 
+  // Client billing & monetization local state
+  const [billingPricingMode, setBillingPricingMode] = useState<BillingPricingMode>("passthrough");
+  const [billingMarkupPercent, setBillingMarkupPercent] = useState<number>(0);
+  const [billingByokFeePerMillionCents, setBillingByokFeePerMillionCents] = useState<number>(0);
+  const [hideInternalCostFromClient, setHideInternalCostFromClient] = useState<boolean>(false);
+
   // Sync local state from selected company
   useEffect(() => {
     if (!selectedCompany) return;
@@ -51,12 +58,44 @@ export function CompanySettings() {
     setDescription(selectedCompany.description ?? "");
     setLogoUrl(selectedCompany.logoUrl ?? "");
     setGovernance(selectedCompany.interactionResolverGovernance ?? {});
+    setBillingPricingMode((selectedCompany.billingPricingMode as BillingPricingMode) ?? "passthrough");
+    setBillingMarkupPercent(selectedCompany.billingMarkupPercent ?? 0);
+    setBillingByokFeePerMillionCents(selectedCompany.billingByokFeePerMillionCents ?? 0);
+    setHideInternalCostFromClient(Boolean(selectedCompany.hideInternalCostFromClient));
   }, [selectedCompany]);
 
   const generalDirty =
     !!selectedCompany &&
     (companyName !== selectedCompany.name ||
       description !== (selectedCompany.description ?? ""));
+
+  const billingDirty =
+    !!selectedCompany &&
+    (billingPricingMode !== (selectedCompany.billingPricingMode ?? "passthrough") ||
+      billingMarkupPercent !== (selectedCompany.billingMarkupPercent ?? 0) ||
+      billingByokFeePerMillionCents !== (selectedCompany.billingByokFeePerMillionCents ?? 0) ||
+      hideInternalCostFromClient !== Boolean(selectedCompany.hideInternalCostFromClient));
+
+  const billingMutation = useMutation({
+    mutationFn: (data: {
+      billingPricingMode?: BillingPricingMode;
+      billingMarkupPercent?: number;
+      billingByokFeePerMillionCents?: number;
+      hideInternalCostFromClient?: boolean;
+    }) => companiesApi.update(selectedCompanyId!, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.companies.all });
+    },
+  });
+
+  function handleSaveBilling() {
+    billingMutation.mutate({
+      billingPricingMode,
+      billingMarkupPercent,
+      billingByokFeePerMillionCents,
+      hideInternalCostFromClient,
+    });
+  }
 
   const generalMutation = useMutation({
     mutationFn: (data: {
@@ -331,6 +370,116 @@ export function CompanySettings() {
             : null
         }
       />
+
+      {/* Client Billing & Monetization */}
+      <div className="max-w-2xl space-y-4" data-testid="company-settings-billing-section">
+        <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          Client Billing & Monetization
+        </div>
+        <div className="space-y-4 border border-border p-4">
+          <Field
+            label="Pricing Mode"
+            hint="Determines how client billable amounts are calculated for agent inference and token runs."
+          >
+            <select
+              className="w-full rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm outline-none"
+              value={billingPricingMode}
+              onChange={(e) => setBillingPricingMode(e.target.value as BillingPricingMode)}
+            >
+              <option value="passthrough" className="bg-background text-foreground">
+                Direct Cost Passthrough (at cost)
+              </option>
+              <option value="simulated_markup" className="bg-background text-foreground">
+                Simulated Market Value Markup (Recommended for subscriptions / BYOT spread)
+              </option>
+              <option value="fixed_markup" className="bg-background text-foreground">
+                Direct Spend Markup (% added to real biller spend)
+              </option>
+              <option value="byok_fee" className="bg-background text-foreground">
+                Bring Your Own Key Platform Fee (Flat fee per million tokens)
+              </option>
+            </select>
+          </Field>
+
+          {(billingPricingMode === "simulated_markup" || billingPricingMode === "fixed_markup") && (
+            <Field
+              label="Markup Percentage (%)"
+              hint={
+                billingPricingMode === "simulated_markup"
+                  ? "Commercial markup added on top of the simulated market token rate. E.g. 30 adds 30% to benchmark value."
+                  : "Markup added on top of actual billed API costs. E.g. 20 adds 20% to cost."
+              }
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min="0"
+                  max="1000"
+                  step="1"
+                  className="w-32 rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm outline-none"
+                  value={billingMarkupPercent}
+                  onChange={(e) => setBillingMarkupPercent(Math.max(0, Number(e.target.value)))}
+                />
+                <span className="text-sm text-muted-foreground">% markup</span>
+              </div>
+            </Field>
+          )}
+
+          {billingPricingMode === "byok_fee" && (
+            <Field
+              label="Platform Fee per Million Tokens ($)"
+              hint="Fee charged to the client for every million tokens processed, regardless of provider or key origin."
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">$</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.05"
+                  className="w-32 rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm outline-none"
+                  value={(billingByokFeePerMillionCents / 100).toFixed(2)}
+                  onChange={(e) =>
+                    setBillingByokFeePerMillionCents(Math.max(0, Math.round(Number(e.target.value) * 100)))
+                  }
+                />
+                <span className="text-sm text-muted-foreground">/ 1M tokens</span>
+              </div>
+            </Field>
+          )}
+
+          <div className="pt-2 border-t border-border">
+            <ToggleField
+              label="Hide Internal Costs & Spread from Client"
+              hint="When enabled, client-facing views only show billable commercial amounts and total token usage. Internal API costs, $0 subscription costs, and your margin spread are completely hidden."
+              checked={hideInternalCostFromClient}
+              onChange={setHideInternalCostFromClient}
+              toggleTestId="company-settings-hide-internal-cost-toggle"
+            />
+          </div>
+
+          {billingDirty && (
+            <div className="flex items-center gap-2 pt-2">
+              <Button
+                size="sm"
+                onClick={handleSaveBilling}
+                disabled={billingMutation.isPending}
+              >
+                {billingMutation.isPending ? "Saving..." : "Save billing settings"}
+              </Button>
+              {billingMutation.isSuccess && (
+                <span className="text-xs text-muted-foreground">Saved</span>
+              )}
+              {billingMutation.isError && (
+                <span className="text-xs text-destructive">
+                  {billingMutation.error instanceof Error
+                    ? billingMutation.error.message
+                    : "Failed to save billing settings"}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
 
       <InstanceGeneralSettings embedded />
 
