@@ -330,10 +330,23 @@ export async function createApp(
   },
 ) {
   const app = express();
+  app.disable("x-powered-by");
   app.locals.paperclipDb = db;
   const captureRawBody = (req: express.Request, _res: express.Response, buf: Buffer) => {
     (req as unknown as { rawBody: Buffer }).rawBody = buf;
   };
+
+  // Standard HTTP security response headers
+  app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "SAMEORIGIN");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("X-XSS-Protection", "0");
+    if (req.secure || req.headers["x-forwarded-proto"] === "https") {
+      res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    }
+    next();
+  });
 
   // Respect the operator's `TRUST_PROXY` env var (see middleware/trust-proxy.ts).
   // Default is unset → Express trusts nothing, which is the only safe choice

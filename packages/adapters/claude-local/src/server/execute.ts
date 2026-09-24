@@ -833,6 +833,14 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       },
     });
   }
+  if (!executionTargetIsRemote && !hasExplicitClaudeConfigDir && !localProcessSandbox) {
+    const localManagedClaudeConfigDir = path.join(claudeRuntimeStateDir, "config");
+    await fs.mkdir(localManagedClaudeConfigDir, { recursive: true });
+    if (!env.CLAUDE_CONFIG_DIR) {
+      env.CLAUDE_CONFIG_DIR = localManagedClaudeConfigDir;
+      loggedEnv.CLAUDE_CONFIG_DIR = localManagedClaudeConfigDir;
+    }
+  }
   let paperclipBridge: Awaited<ReturnType<typeof startAdapterExecutionTargetPaperclipBridge>> = null;
   if (executionTargetIsRemote && adapterExecutionTargetUsesPaperclipBridge(runtimeExecutionTarget)) {
     paperclipBridge = await startAdapterExecutionTargetPaperclipBridge({

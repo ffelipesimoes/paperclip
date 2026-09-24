@@ -4367,6 +4367,7 @@ export function agentRoutes(
     const existing = await getAccessibleResource(req, res, svc.getById(id), "Agent not found");
     if (!existing) return;
 
+    assertInstanceAdmin(req);
     await assertCanManageInstructionsPath(req, existing);
     assertExternalInstructionsAdmin(req, existing);
 
@@ -4453,9 +4454,9 @@ export function agentRoutes(
     const id = req.params.id as string;
     const existing = await getAccessibleResource(req, res, svc.getById(id), "Agent not found");
     if (!existing) return;
+    assertInstanceAdmin(req);
     await assertCanManageInstructionsPath(req, existing);
     assertExternalInstructionsAdmin(req, existing);
-    if (req.body.mode === "external") assertInstanceAdmin(req);
 
     const actor = getActorInfo(req);
     const { bundle, adapterConfig } = await instructions.updateBundle(existing, req.body);
@@ -4654,9 +4655,10 @@ export function agentRoutes(
       hasOwn(patchData, "adapterType") ||
       hasOwn(patchData, "adapterConfig");
     const touchesEnvironmentSelection =
-      hasOwn(patchData, "defaultEnvironmentId") &&
-      patchData.defaultEnvironmentId !== existing.defaultEnvironmentId;
-    if (touchesAdapterConfiguration || touchesEnvironmentSelection) {
+      hasOwn(patchData, "defaultEnvironmentId");
+    const touchesRuntimeConfiguration =
+      hasOwn(patchData, "runtimeConfig");
+    if (touchesAdapterConfiguration || touchesEnvironmentSelection || touchesRuntimeConfiguration) {
       assertInstanceAdmin(req);
     }
     if (touchesAdapterConfiguration) {
