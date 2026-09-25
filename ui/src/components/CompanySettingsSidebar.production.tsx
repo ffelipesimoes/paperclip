@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
+  Building2,
   ChevronLeft,
   Clock3,
   Cpu,
@@ -19,6 +20,7 @@ import {
 import type { PluginRecord } from "@paperclipai/shared";
 import { sidebarBadgesApi } from "@/api/sidebarBadges";
 import { pluginsApi } from "@/api/plugins";
+import { accessApi } from "@/api/access";
 import { ApiError } from "@/api/client";
 import { Link, NavLink } from "@/lib/router";
 import { INSTANCE_SETTINGS_PATH_PREFIX } from "@/lib/instance-settings";
@@ -57,6 +59,14 @@ export function CompanySettingsSidebar() {
     companyId: selectedCompanyId,
     enabled: !!selectedCompanyId,
   });
+  const { data: boardAccess } = useQuery({
+    queryKey: queryKeys.access.currentBoardAccess,
+    queryFn: () => accessApi.getCurrentBoardAccess(),
+    retry: false,
+  });
+  const isInstanceAdmin =
+    Boolean(boardAccess?.isInstanceAdmin) ||
+    boardAccess?.source === "local_implicit";
   const { data: badges } = useQuery({
     queryKey: selectedCompanyId
       ? queryKeys.sidebarBadges(selectedCompanyId)
@@ -141,6 +151,14 @@ export function CompanySettingsSidebar() {
               to={`${INSTANCE_SETTINGS_PATH_PREFIX}/environments`}
               label="Environments"
               icon={MonitorCog}
+              end
+            />
+          )}
+          {isInstanceAdmin && showPage("instance.companies") && (
+            <SidebarNavItem
+              to={`${INSTANCE_SETTINGS_PATH_PREFIX}/companies`}
+              label="Organizations"
+              icon={Building2}
               end
             />
           )}

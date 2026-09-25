@@ -230,6 +230,9 @@ function boardRoutes(streamlinedUiEnabled: boolean) {
         <Route path="company/settings/instance/environments/new" element={<CompanyEnvironments mode="create" />} />
         <Route path="company/settings/instance/environments/:environmentId/edit" element={<CompanyEnvironments mode="edit" />} />
       </Route>
+      <Route element={<HiddenSettingsPageGate pageKey="instance.companies" />}>
+        <Route path="company/settings/instance/companies" element={<Companies />} />
+      </Route>
       <Route element={<HiddenSettingsPageGate pageKey="instance.access" />}>
         <Route path="company/settings/instance/access" element={<InstanceAccess />} />
       </Route>
