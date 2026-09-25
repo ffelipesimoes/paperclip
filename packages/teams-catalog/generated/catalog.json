@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "packageName": "@paperclipai/teams-catalog",
   "packageVersion": "0.1.0",
-  "generatedAt": "2026-06-04T18:03:41.262Z",
+  "generatedAt": "2026-09-25T17:09:50.626Z",
   "teams": [
     {
       "id": "paperclipai:bundled:company-defaults:core-exec-team",
@@ -237,6 +237,109 @@
       "trustLevel": "markdown_only",
       "compatibility": "compatible",
       "contentHash": "sha256:15a04b36f31d4c9a391bb499c92e91fedfcc237cfa6c3d41ea3ddb441bc85c5b"
+    },
+    {
+      "id": "paperclipai:bundled:sales:b2b-sales",
+      "key": "paperclipai/bundled/sales/b2b-sales",
+      "kind": "bundled",
+      "category": "sales",
+      "slug": "b2b-sales",
+      "name": "B2B Sales & Outreach",
+      "description": "Bundled revenue team that pairs a Sales Lead with an outbound SDR to discover leads, craft outreach sequences, and qualify pipeline.",
+      "path": "catalog/bundled/sales/b2b-sales",
+      "entrypoint": "TEAM.md",
+      "schema": "agentcompanies/v1",
+      "defaultInstall": false,
+      "recommendedForCompanyTypes": [
+        "b2b",
+        "saas",
+        "agency",
+        "sales"
+      ],
+      "tags": [
+        "sales",
+        "outbound",
+        "sdr",
+        "pipeline"
+      ],
+      "counts": {
+        "agents": 2,
+        "projects": 1,
+        "tasks": 0,
+        "routines": 1,
+        "localSkills": 0,
+        "catalogSkills": 2,
+        "externalSkillSources": 0
+      },
+      "rootAgentSlugs": [
+        "sales-lead"
+      ],
+      "agentSlugs": [
+        "sales-lead",
+        "sdr"
+      ],
+      "projectSlugs": [
+        "sales-pipeline"
+      ],
+      "requiredSkills": [
+        {
+          "type": "catalog",
+          "ref": "issue-triage",
+          "agentSlugs": [
+            "sales-lead"
+          ],
+          "resolved": true,
+          "catalogSkillId": "paperclipai:bundled:paperclip-operations:issue-triage",
+          "catalogSkillKey": "paperclipai/bundled/paperclip-operations/issue-triage"
+        },
+        {
+          "type": "catalog",
+          "ref": "task-planning",
+          "agentSlugs": [
+            "sales-lead"
+          ],
+          "resolved": true,
+          "catalogSkillId": "paperclipai:bundled:paperclip-operations:task-planning",
+          "catalogSkillKey": "paperclipai/bundled/paperclip-operations/task-planning"
+        }
+      ],
+      "envInputs": [],
+      "sourceRefs": [],
+      "files": [
+        {
+          "path": "TEAM.md",
+          "kind": "team",
+          "sizeBytes": 1494,
+          "sha256": "c3315403a5b8a7ffcd2348ec116dfa307f8b0ac654673f307b360aa729f71fd2"
+        },
+        {
+          "path": "agents/sales-lead/AGENTS.md",
+          "kind": "agent",
+          "sizeBytes": 926,
+          "sha256": "c200ee9d71ca7da2118c068cc1f0ed410975c8309f95d25d3aafffa5f6bbd55b"
+        },
+        {
+          "path": "agents/sdr/AGENTS.md",
+          "kind": "agent",
+          "sizeBytes": 884,
+          "sha256": "26fff4eb126cde9939cccdc603c497c96f817428c5d9d3cbdb734260719db9fd"
+        },
+        {
+          "path": "projects/sales-pipeline/PROJECT.md",
+          "kind": "project",
+          "sizeBytes": 370,
+          "sha256": "bfcbfc0f7947511f836ff6f9eefb428f4ca171028656c0e4fc4fc4a21d517d5a"
+        },
+        {
+          "path": "projects/sales-pipeline/tasks/weekly-pipeline-review/TASK.md",
+          "kind": "task",
+          "sizeBytes": 290,
+          "sha256": "1dffd6f65571831fb33f01aa5c01fbf4b464bf6db10f41871d42fa6349dbceb9"
+        }
+      ],
+      "trustLevel": "markdown_only",
+      "compatibility": "compatible",
+      "contentHash": "sha256:47f761040c96447b1706fd179eebca9cd66143667656980b81212cf0c6d61508"
     },
     {
       "id": "paperclipai:bundled:software-development:product-engineering",

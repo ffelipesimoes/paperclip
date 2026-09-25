@@ -65,6 +65,8 @@ interface SidebarNavItemProps {
   trailingLabel?: string;
   /** Rendered inside the right-aligned status cluster, before the live dot. */
   liveAccessory?: ReactNode;
+  /** Data tour selector attribute for product walkthroughs. */
+  dataTour?: string;
 }
 
 export function SidebarNavItem({
@@ -86,6 +88,7 @@ export function SidebarNavItem({
   trailing,
   trailingLabel,
   liveAccessory,
+  dataTour,
 }: SidebarNavItemProps) {
   const { isMobile, setSidebarOpen, collapsed, peeking } = useSidebar();
   // A contextual takeover forces full labels even when the saved global app
@@ -118,6 +121,7 @@ export function SidebarNavItem({
       to={to}
       state={SIDEBAR_SCROLL_RESET_STATE}
       end={end}
+      data-tour={dataTour}
       aria-label={railAriaLabel}
       onClick={() => { if (isMobile) setSidebarOpen(false); }}
       className={({ isActive }) =>
