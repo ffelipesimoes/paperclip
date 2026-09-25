@@ -30,6 +30,7 @@ export const createCompanySchema = z.object({
   billingMarkupPercent: z.number().int().min(0).max(1000).optional().default(0),
   billingByokFeePerMillionCents: z.number().int().nonnegative().optional().default(0),
   hideInternalCostFromClient: z.boolean().optional().default(false),
+  requireByok: z.boolean().optional().default(false),
   defaultResponsibleUserId: z.string().min(1).nullable().optional(),
 });
 

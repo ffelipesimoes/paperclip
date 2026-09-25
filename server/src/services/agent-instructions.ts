@@ -112,6 +112,9 @@ function isMarkdown(relativePath: string) {
 }
 
 function normalizeRelativeFilePath(candidatePath: string): string {
+  if (candidatePath.includes("\0")) {
+    throw unprocessable("Instructions file path cannot contain null bytes");
+  }
   const normalized = path.posix.normalize(candidatePath.replaceAll("\\", "/")).replace(/^\/+/, "");
   if (!normalized || normalized === "." || normalized === ".." || normalized.startsWith("../")) {
     throw unprocessable("Instructions file path must stay within the bundle root");
@@ -508,9 +511,18 @@ export function agentInstructionsService() {
     }
     if (!state.rootPath) throw notFound("Agent instructions bundle is not configured");
     const absolutePath = resolvePathWithinRoot(state.rootPath, relativePath);
+    const [realPath, realRoot] = await Promise.all([
+      fs.realpath(absolutePath).catch(() => null),
+      fs.realpath(state.rootPath).catch(() => null),
+    ]);
+    if (!realPath || !realRoot) throw notFound("Instructions file not found");
+    const relativeToRealRoot = path.relative(realRoot, realPath);
+    if (relativeToRealRoot === ".." || relativeToRealRoot.startsWith(`..${path.sep}`)) {
+      throw unprocessable("Instructions file path escapes bundle root via symlink");
+    }
     const [content, stat] = await Promise.all([
-      fs.readFile(absolutePath, "utf8").catch(() => null),
-      fs.stat(absolutePath).catch(() => null),
+      fs.readFile(realPath, "utf8").catch(() => null),
+      fs.stat(realPath).catch(() => null),
     ]);
     if (content === null || !stat?.isFile()) throw notFound("Instructions file not found");
     const normalizedPath = normalizeRelativeFilePath(relativePath);
@@ -588,6 +600,9 @@ export function agentInstructionsService() {
       if (!rootPath) {
         throw unprocessable("External instructions bundles require an absolute rootPath");
       }
+      if (rootPath.includes("\0")) {
+        throw unprocessable("Instructions root path cannot contain null bytes");
+      }
       const resolvedRoot = resolveHomeAwarePath(rootPath);
       if (!path.isAbsolute(resolvedRoot)) {
         throw unprocessable("External instructions bundles require an absolute rootPath");
@@ -644,7 +659,23 @@ export function agentInstructionsService() {
 
     const prepared = await ensureWritableBundle(agent, options);
     const absolutePath = resolvePathWithinRoot(prepared.state.rootPath!, relativePath);
-    await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+    const realRoot = await fs.realpath(prepared.state.rootPath!).catch(() => null);
+    if (!realRoot) throw unprocessable("Instructions bundle root does not exist");
+    const parentDir = path.dirname(absolutePath);
+    await fs.mkdir(parentDir, { recursive: true });
+    const realParentDir = await fs.realpath(parentDir).catch(() => null);
+    if (!realParentDir) throw unprocessable("Target directory could not be resolved");
+    const parentRel = path.relative(realRoot, realParentDir);
+    if (parentRel === ".." || parentRel.startsWith(`..${path.sep}`)) {
+      throw unprocessable("Instructions file path escapes bundle root via symlink");
+    }
+    const existingReal = await fs.realpath(absolutePath).catch(() => null);
+    if (existingReal) {
+      const fileRel = path.relative(realRoot, existingReal);
+      if (fileRel === ".." || fileRel.startsWith(`..${path.sep}`)) {
+        throw unprocessable("Instructions file path escapes bundle root via symlink");
+      }
+    }
     await fs.writeFile(absolutePath, content, "utf8");
     const nextAgent = { ...agent, adapterConfig: prepared.adapterConfig };
     const [bundle, file] = await Promise.all([
@@ -669,6 +700,16 @@ export function agentInstructionsService() {
       throw unprocessable("Cannot delete the bundle entry file");
     }
     const absolutePath = resolvePathWithinRoot(state.rootPath, normalizedPath);
+    const [realPath, realRoot] = await Promise.all([
+      fs.realpath(absolutePath).catch(() => null),
+      fs.realpath(state.rootPath).catch(() => null),
+    ]);
+    if (realPath && realRoot) {
+      const fileRel = path.relative(realRoot, realPath);
+      if (fileRel === ".." || fileRel.startsWith(`..${path.sep}`)) {
+        throw unprocessable("Instructions file path escapes bundle root via symlink");
+      }
+    }
     await fs.rm(absolutePath, { force: true });
     const adapterConfig = buildPersistedBundleConfig(derived, state);
     const bundle = await getBundle({ ...agent, adapterConfig });

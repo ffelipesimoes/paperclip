@@ -1688,6 +1688,13 @@
       "when": 1790269981479,
       "tag": "0242_soft_fabian_cortez",
       "breakpoints": true
+    },
+    {
+      "idx": 243,
+      "version": "7",
+      "when": 1790356095329,
+      "tag": "0243_bored_skin",
+      "breakpoints": true
     }
   ]
 }

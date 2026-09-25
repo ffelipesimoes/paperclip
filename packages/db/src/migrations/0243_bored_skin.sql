@@ -1,0 +1,1 @@
+ALTER TABLE "companies" ADD COLUMN "require_byok" boolean DEFAULT false NOT NULL;
