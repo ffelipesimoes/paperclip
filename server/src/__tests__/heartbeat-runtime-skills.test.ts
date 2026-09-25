@@ -15,6 +15,7 @@ import {
   toolProfileBindings,
   toolProfileEntries,
   toolProfiles,
+  instanceSettings,
 } from "@paperclipai/db";
 import type { AdapterRuntimeMcpServer } from "@paperclipai/adapter-utils";
 import type { PaperclipSkillEntry } from "@paperclipai/adapter-utils/server-utils";
@@ -24,7 +25,7 @@ import {
 } from "./helpers/embedded-postgres.js";
 import { companySkillService } from "../services/company-skills.ts";
 import { heartbeatService } from "../services/heartbeat.ts";
-import { instanceSettingsService } from "../services/instance-settings.ts";
+import { instanceSettingsService, invalidateInstanceSettingsCache } from "../services/instance-settings.ts";
 import { registerServerAdapter, unregisterServerAdapter } from "../adapters/index.ts";
 
 const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();
@@ -128,6 +129,8 @@ describeEmbeddedPostgres("heartbeat runtime skill version pins", () => {
         "companies"
       RESTART IDENTITY CASCADE
     `));
+    await db.delete(instanceSettings);
+    invalidateInstanceSettingsCache(db as object);
     await Promise.all(Array.from(cleanupDirs, (dir) => fs.rm(dir, { recursive: true, force: true })));
     cleanupDirs.clear();
   });

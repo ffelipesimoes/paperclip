@@ -26,6 +26,7 @@ import { getEmbeddedPostgresTestSupport, startEmbeddedPostgresTestDatabase } fro
 import { smokeLabRoutes } from "../routes/smoke-lab.js";
 import { SMOKE_LAB_OAUTH_SCOPE } from "../services/smoke-lab.js";
 import { errorHandler } from "../middleware/index.js";
+import { invalidateInstanceSettingsCache } from "../services/instance-settings.js";
 
 const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();
 const describeEmbeddedPostgres = embeddedPostgresSupport.supported ? describe : describe.skip;
@@ -47,6 +48,7 @@ async function enableSmokeLab(db: TestDb) {
     target: [instanceSettings.singletonKey],
     set: { experimental: { enableSmokeLab: true }, updatedAt: new Date() },
   });
+  invalidateInstanceSettingsCache(db as object);
 }
 
 async function createAgent(db: TestDb, companyId: string) {
@@ -125,6 +127,7 @@ describeEmbeddedPostgres("smoke lab service pack and results API", () => {
     await db.delete(companies);
     await db.delete(authUsers);
     await db.delete(instanceSettings);
+    invalidateInstanceSettingsCache(db as object);
   });
 
   afterAll(async () => {

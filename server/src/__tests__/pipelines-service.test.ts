@@ -35,7 +35,7 @@ import {
   type PipelineActor,
 } from "../services/pipelines.ts";
 import { routineService } from "../services/routines.ts";
-import { instanceSettingsService } from "../services/instance-settings.ts";
+import { instanceSettingsService, invalidateInstanceSettingsCache } from "../services/instance-settings.ts";
 
 const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();
 const describeEmbeddedPostgres = embeddedPostgresSupport.supported ? describe : describe.skip;
@@ -82,6 +82,7 @@ describeEmbeddedPostgres("pipelineService", () => {
     await db.delete(agents);
     await db.delete(companies);
     await db.delete(instanceSettings);
+    invalidateInstanceSettingsCache(db as object);
   });
 
   afterAll(async () => {

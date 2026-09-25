@@ -31,7 +31,7 @@ import {
   startEmbeddedPostgresTestDatabase,
 } from "./helpers/embedded-postgres.js";
 import { issueService } from "../services/issues.ts";
-import { instanceSettingsService } from "../services/instance-settings.ts";
+import { instanceSettingsService, invalidateInstanceSettingsCache } from "../services/instance-settings.ts";
 import * as providerRegistry from "../secrets/provider-registry.ts";
 import { routineService } from "../services/routines.ts";
 import { secretService } from "../services/secrets.ts";
@@ -84,6 +84,7 @@ describeEmbeddedPostgres("routine service live-execution coalescing", () => {
     await db.delete(agents);
     await db.delete(companies);
     await db.delete(instanceSettings);
+    invalidateInstanceSettingsCache(db as object);
   });
 
   afterAll(async () => {
@@ -215,15 +216,29 @@ describeEmbeddedPostgres("routine service live-execution coalescing", () => {
   }
 
   async function armWorktreeExecution(cutoff: Date, instanceId = "worktree-routines-test") {
-    await db.insert(instanceSettings).values({
-      singletonKey: "default",
-      general: {},
-      experimental: {
-        enableWorktreeRunExecution: true,
-        worktreeRunExecutionActivatedAt: cutoff.toISOString(),
-        worktreeRunExecutionActivationInstanceId: instanceId,
-      },
-    });
+    await db
+      .insert(instanceSettings)
+      .values({
+        singletonKey: "default",
+        general: {},
+        experimental: {
+          enableWorktreeRunExecution: true,
+          worktreeRunExecutionActivatedAt: cutoff.toISOString(),
+          worktreeRunExecutionActivationInstanceId: instanceId,
+        },
+      })
+      .onConflictDoUpdate({
+        target: [instanceSettings.singletonKey],
+        set: {
+          experimental: {
+            enableWorktreeRunExecution: true,
+            worktreeRunExecutionActivatedAt: cutoff.toISOString(),
+            worktreeRunExecutionActivationInstanceId: instanceId,
+          },
+          updatedAt: new Date(),
+        },
+      });
+    invalidateInstanceSettingsCache(db as object);
   }
 
   async function insertDispatchedRun(input: {

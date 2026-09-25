@@ -143,9 +143,12 @@ export function instanceSettingsRoutes(db: Db) {
 
   router.patch(
     "/instance/settings",
+    (req, _res, next) => {
+      assertCanManageInstanceSettings(req);
+      next();
+    },
     validate(patchInstanceSettingsSchema),
     async (req, res) => {
-      assertCanManageInstanceSettings(req);
       if (Object.prototype.hasOwnProperty.call(req.body, "defaultEnvironmentId")) {
         await assertEnvironmentSelectionForCompany(
           environments,
@@ -207,9 +210,12 @@ export function instanceSettingsRoutes(db: Db) {
 
   router.patch(
     "/instance/settings/general",
+    (req, _res, next) => {
+      assertCanManageInstanceSettings(req);
+      next();
+    },
     validate(patchInstanceGeneralSettingsSchema),
     async (req, res) => {
-      assertCanManageInstanceSettings(req);
       // Floor: on cloud-managed instances the execution mode is pinned by the
       // platform (the execution-policy bootstrap writes it at boot). No
       // instance admin — including a computed owner-admin — may change it: a
@@ -270,9 +276,12 @@ export function instanceSettingsRoutes(db: Db) {
 
   router.patch(
     "/instance/settings/experimental",
+    (req, _res, next) => {
+      assertCanManageInstanceSettings(req);
+      next();
+    },
     validate(patchInstanceExperimentalSettingsSchema),
     async (req, res) => {
-      assertCanManageInstanceSettings(req);
       // Hiding the whole Experimental page floors every toggle; otherwise
       // only individually hidden keys are floored.
       const hidden = getHiddenSettings();
@@ -315,9 +324,12 @@ export function instanceSettingsRoutes(db: Db) {
 
   router.post(
     "/instance/task-drain",
+    (req, _res, next) => {
+      assertCanManageInstanceSettings(req);
+      next();
+    },
     validate(startTaskDrainRequestSchema),
     async (req, res) => {
-      assertCanManageInstanceSettings(req);
       const actor = getActorInfo(req);
       const companyIds = await svc.listCompanyIds();
       const ttlMs = req.body.ttlMs ?? null;
