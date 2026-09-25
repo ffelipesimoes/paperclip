@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
+  Building2,
   Check,
   ChevronsUpDown,
   GripVertical,
@@ -256,6 +257,9 @@ export function SidebarCompanyMenu({ open: controlledOpen, onOpenChange }: Sideb
     membership?.membershipRole === "owner" ||
     membership?.membershipRole === "admin" ||
     (!boardAccess && import.meta.env.DEV);
+  const isInstanceAdmin =
+    Boolean(boardAccess?.isInstanceAdmin) ||
+    boardAccess?.source === "local_implicit";
   const currentUserId = session?.user?.id ?? session?.session?.userId ?? null;
   const { orderedCompanies, persistOrder } = useCompanyOrder({
     companies: sidebarCompanies,
@@ -539,6 +543,25 @@ export function SidebarCompanyMenu({ open: controlledOpen, onOpenChange }: Sideb
                 <span className="min-w-0 flex-1 truncate">
                   {currentName ? `Invite people to ${currentName}` : "Invite people"}
                 </span>
+              </Link>
+            </DropdownMenuItem>
+          ) : null}
+          {isInstanceAdmin ? (
+            <DropdownMenuItem asChild disabled={isEditingOrder} className={ORGANIZATION_ACTION_CLASS}>
+              <Link
+                to="/company/settings/instance/companies"
+                onClick={(event) => {
+                  if (isEditingOrder) {
+                    event.preventDefault();
+                    return;
+                  }
+                  closeNavigationChrome();
+                }}
+              >
+                <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground">
+                  <Building2 className="size-4" />
+                </span>
+                <span className="min-w-0 flex-1 truncate">Manage organizations</span>
               </Link>
             </DropdownMenuItem>
           ) : null}

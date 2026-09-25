@@ -6,18 +6,22 @@ import {
   agentConfigRevisions,
   agents,
   agentWakeupRequests,
+  budgetPolicies,
   builtInManagedResources,
   cases,
   companies,
+  companySecrets,
   companySkillVersions,
   companySkills,
   companyMemberships,
   costEvents,
   createDb,
+  goals,
   heartbeatRunEvents,
   heartbeatRuns,
   issues,
   principalPermissionGrants,
+  projects,
   routines,
   routineTriggers,
 } from "@paperclipai/db";
@@ -60,11 +64,15 @@ describeEmbeddedPostgres("companyService", () => {
     await db.delete(agentConfigRevisions);
     await db.delete(activityLog);
     await db.delete(costEvents);
+    await db.delete(issues);
+    await db.delete(projects);
+    await db.delete(goals);
+    await db.delete(budgetPolicies);
+    await db.delete(companySecrets);
     await db.delete(agents);
     await db.delete(principalPermissionGrants);
     await db.delete(companyMemberships);
     await db.delete(cases);
-    await db.delete(issues);
     await db.delete(companies);
   });
 
@@ -1209,5 +1217,108 @@ describeEmbeddedPostgres("companyService", () => {
     expect(coStats.subscriptionTokens).toBe(1_200_000);
     // Sonnet simulated: 600 cents + gpt-4o simulated: 100k*2.5/M ($0.25) + 20k*10/M ($0.20) = $0.45 = 45 cents -> total 645 cents
     expect(coStats.simulatedCostCents).toBe(645);
+  });
+
+  it("removes a company and all its relational child records without FK violation", async () => {
+    const svc = companyService(db);
+    const company = await svc.create({ name: "Deletable Corp" });
+
+    // Insert an agent
+    const [agent] = await db
+      .insert(agents)
+      .values({
+        companyId: company.id,
+        name: "Test Worker",
+        role: "general",
+        adapterType: "codex_local",
+        status: "idle",
+      })
+      .returning();
+
+    // Insert parent and child goals
+    const [parentGoal] = await db
+      .insert(goals)
+      .values({
+        companyId: company.id,
+        title: "Parent Goal",
+        ownerAgentId: agent.id,
+      })
+      .returning();
+
+    const [childGoal] = await db
+      .insert(goals)
+      .values({
+        companyId: company.id,
+        title: "Child Goal",
+        parentId: parentGoal.id,
+      })
+      .returning();
+
+    // Insert a project referencing a goal
+    const [proj] = await db
+      .insert(projects)
+      .values({
+        companyId: company.id,
+        name: "Test Project",
+        goalId: childGoal.id,
+        leadAgentId: agent.id,
+      })
+      .returning();
+
+    // Insert parent and child issues
+    const [parentIssue] = await db
+      .insert(issues)
+      .values({
+        companyId: company.id,
+        title: "Parent Task",
+        identifier: "DEL-1",
+        status: "open",
+        projectId: proj.id,
+        goalId: childGoal.id,
+        assigneeAgentId: agent.id,
+      })
+      .returning();
+
+    await db
+      .insert(issues)
+      .values({
+        companyId: company.id,
+        title: "Child Task",
+        identifier: "DEL-2",
+        status: "open",
+        parentId: parentIssue.id,
+        projectId: proj.id,
+      });
+
+    // Insert a budget policy
+    await db.insert(budgetPolicies).values({
+      companyId: company.id,
+      scopeType: "company",
+      scopeId: company.id,
+      amount: 5000,
+      windowKind: "calendar_month_utc",
+      createdByType: "user",
+      createdByUserId: "admin",
+    });
+
+    // Insert a secret
+    await db.insert(companySecrets).values({
+      companyId: company.id,
+      name: "API_SECRET",
+      key: "API_SECRET",
+    });
+
+    // Delete company
+    const removed = await svc.remove(company.id);
+    expect(removed).not.toBeNull();
+    expect(removed?.id).toBe(company.id);
+
+    // Verify company is gone
+    const remaining = await db.select().from(companies).where(eq(companies.id, company.id));
+    expect(remaining).toHaveLength(0);
+
+    // Verify issues are gone
+    const remainingIssues = await db.select().from(issues).where(eq(issues.companyId, company.id));
+    expect(remainingIssues).toHaveLength(0);
   });
 });

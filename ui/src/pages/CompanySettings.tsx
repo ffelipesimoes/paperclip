@@ -1,5 +1,5 @@
 import { ChangeEvent, useEffect, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type InteractionResolverGovernance,
   type IssueThreadInteractionKind,
@@ -11,7 +11,9 @@ import { useCloudInstance } from "../hooks/useCloudInstance";
 import { companiesApi } from "../api/companies";
 import { assetsApi } from "../api/assets";
 import { budgetsApi } from "../api/budgets";
+import { accessApi } from "../api/access";
 import { queryKeys } from "../lib/queryKeys";
+import { useNavigate } from "@/lib/router";
 import { Button } from "@/components/ui/button";
 import { SlidersHorizontal } from "lucide-react";
 import {
@@ -36,6 +38,15 @@ export function CompanySettings() {
   } = useCompany();
   const { setBreadcrumbs } = useBreadcrumbs();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const { data: boardAccess } = useQuery({
+    queryKey: queryKeys.access.currentBoardAccess,
+    queryFn: () => accessApi.getCurrentBoardAccess(),
+    retry: false,
+  });
+  const isInstanceAdmin =
+    Boolean(boardAccess?.isInstanceAdmin) ||
+    boardAccess?.source === "local_implicit";
   // Managed instances derive the task ID prefix from the company name, so a
   // rename here also renumbers the existing task IDs.
   const isCloudManaged = Boolean(useCloudInstance());
@@ -52,6 +63,7 @@ export function CompanySettings() {
   const [billingMarkupPercent, setBillingMarkupPercent] = useState<number>(0);
   const [billingByokFeePerMillionCents, setBillingByokFeePerMillionCents] = useState<number>(0);
   const [hideInternalCostFromClient, setHideInternalCostFromClient] = useState<boolean>(false);
+  const [requireByok, setRequireByok] = useState<boolean>(false);
 
   // Sync local state from selected company
   useEffect(() => {
@@ -69,6 +81,7 @@ export function CompanySettings() {
     setBillingMarkupPercent(selectedCompany.billingMarkupPercent ?? 0);
     setBillingByokFeePerMillionCents(selectedCompany.billingByokFeePerMillionCents ?? 0);
     setHideInternalCostFromClient(Boolean(selectedCompany.hideInternalCostFromClient));
+    setRequireByok(Boolean(selectedCompany.requireByok));
   }, [selectedCompany]);
 
   const parsedBudgetMonthlyCents = Math.max(0, Math.round(Number(budgetMonthly || 0) * 100));
@@ -83,7 +96,8 @@ export function CompanySettings() {
     (billingPricingMode !== (selectedCompany.billingPricingMode ?? "passthrough") ||
       billingMarkupPercent !== (selectedCompany.billingMarkupPercent ?? 0) ||
       billingByokFeePerMillionCents !== (selectedCompany.billingByokFeePerMillionCents ?? 0) ||
-      hideInternalCostFromClient !== Boolean(selectedCompany.hideInternalCostFromClient));
+      hideInternalCostFromClient !== Boolean(selectedCompany.hideInternalCostFromClient) ||
+      requireByok !== Boolean(selectedCompany.requireByok));
 
   const billingMutation = useMutation({
     mutationFn: (data: {
@@ -91,6 +105,7 @@ export function CompanySettings() {
       billingMarkupPercent?: number;
       billingByokFeePerMillionCents?: number;
       hideInternalCostFromClient?: boolean;
+      requireByok?: boolean;
     }) => companiesApi.update(selectedCompanyId!, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.companies.all });
@@ -103,6 +118,7 @@ export function CompanySettings() {
       billingMarkupPercent,
       billingByokFeePerMillionCents,
       hideInternalCostFromClient,
+      requireByok,
     });
   }
 
@@ -214,6 +230,26 @@ export function CompanySettings() {
         queryKey: queryKeys.companies.stats
       });
     }
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (companyId: string) => companiesApi.remove(companyId),
+    onSuccess: async (_, deletedId) => {
+      const remaining = companies.filter((c) => c.id !== deletedId);
+      const nextId = remaining[0]?.id ?? null;
+      setSelectedCompanyId(nextId);
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.companies.all,
+      });
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.companies.stats,
+      });
+      if (nextId) {
+        navigate("/company/settings");
+      } else {
+        navigate("/dashboard");
+      }
+    },
   });
 
   useEffect(() => {
@@ -489,7 +525,14 @@ export function CompanySettings() {
             </Field>
           )}
 
-          <div className="pt-2 border-t border-border">
+          <div className="pt-2 border-t border-border flex flex-col gap-3">
+            <ToggleField
+              label="Require Bring-Your-Own-Key (BYOK)"
+              hint="When enabled, agents must have their own API keys bound (e.g. OPENAI_API_KEY, ANTHROPIC_API_KEY). Agents cannot fall back to host subscriptions or credentials."
+              checked={requireByok}
+              onChange={setRequireByok}
+              toggleTestId="company-settings-require-byok-toggle"
+            />
             <ToggleField
               label="Hide Internal Costs & Spread from Client"
               hint="When enabled, client-facing views only show billable commercial amounts and total token usage. Internal API costs, $0 subscription costs, and your margin spread are completely hidden."
@@ -575,6 +618,38 @@ export function CompanySettings() {
               </span>
             )}
           </div>
+
+          {isInstanceAdmin && (
+            <div className="pt-4 border-t border-destructive/20 space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Permanently delete this organization and all its data (agents, tasks, runs, and secrets). This action cannot be undone.
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  disabled={deleteMutation.isPending}
+                  onClick={() => {
+                    if (!selectedCompanyId) return;
+                    const confirmed = window.confirm(
+                      `Permanently delete organization "${selectedCompany.name}" and all its data? THIS CANNOT BE UNDONE.`
+                    );
+                    if (!confirmed) return;
+                    deleteMutation.mutate(selectedCompanyId);
+                  }}
+                >
+                  {deleteMutation.isPending ? "Deleting..." : "Delete organization"}
+                </Button>
+                {deleteMutation.isError && (
+                  <span className="text-xs text-destructive">
+                    {deleteMutation.error instanceof Error
+                      ? deleteMutation.error.message
+                      : "Failed to delete organization"}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

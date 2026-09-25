@@ -353,5 +353,10 @@ describe.sequential("company route cross-company authorization", () => {
     expect(adminWrite.status).toBe(403);
     expect(adminWrite.body.error).toContain("access to this company");
     assertNoTargetMutationSideEffects();
+
+    vi.clearAllMocks();
+    resetMockDefaults();
+    await request(adminWithoutMembershipApp).delete(`/api/companies/${companyBId}`).expect(200);
+    expect(mockCompanyService.remove).toHaveBeenCalledWith(companyBId);
   });
 });

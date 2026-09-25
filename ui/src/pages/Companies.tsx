@@ -20,6 +20,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
+import type { Company } from "@paperclipai/shared";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Pencil,
   Check,
@@ -35,6 +45,7 @@ import {
   Activity,
   Cpu,
   Zap,
+  Settings2,
 } from "lucide-react";
 
 export function Companies() {
@@ -64,14 +75,13 @@ export function Companies() {
   });
   const isInstanceAdmin =
     Boolean(boardAccess?.isInstanceAdmin) ||
-    boardAccess?.source === "local_implicit" ||
-    boardAccess?.memberships?.some((m) => m.membershipRole === "owner" || m.membershipRole === "admin") ||
-    (!boardAccess && import.meta.env.DEV);
+    boardAccess?.source === "local_implicit";
 
   // Inline edit state
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [dialogCompany, setDialogCompany] = useState<Company | null>(null);
 
   const editMutation = useMutation({
     mutationFn: ({ id, newName }: { id: string; newName: string }) =>
@@ -82,12 +92,31 @@ export function Companies() {
     },
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => companiesApi.remove(id),
+  const fullEditMutation = useMutation({
+    mutationFn: ({
+      id,
+      payload,
+    }: {
+      id: string;
+      payload: Parameters<typeof companiesApi.update>[1];
+    }) => companiesApi.update(id, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.companies.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.companies.stats });
+      setDialogCompany(null);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => companiesApi.remove(id),
+    onSuccess: (_, deletedId) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.companies.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.companies.stats });
       setConfirmDeleteId(null);
+      if (selectedCompanyId === deletedId) {
+        const remaining = companies.filter((c) => c.id !== deletedId);
+        setSelectedCompanyId(remaining[0]?.id ?? null);
+      }
     },
   });
 
@@ -257,6 +286,12 @@ export function Companies() {
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem
+                        onClick={() => setDialogCompany(company)}
+                      >
+                        <Settings2 className="h-3.5 w-3.5" />
+                        Edit Organization
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
                         onClick={() => startEdit(company.id, company.name)}
                       >
                         <Pencil className="h-3.5 w-3.5" />
@@ -271,14 +306,18 @@ export function Companies() {
                           Unarchive
                         </DropdownMenuItem>
                       )}
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        variant="destructive"
-                        onClick={() => setConfirmDeleteId(company.id)}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        Delete Organization
-                      </DropdownMenuItem>
+                      {isInstanceAdmin && (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onClick={() => setConfirmDeleteId(company.id)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Delete Organization
+                          </DropdownMenuItem>
+                        </>
+                      )}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
@@ -380,6 +419,153 @@ export function Companies() {
           );
         })}
       </div>
+
+      <EditCompanyModal
+        company={dialogCompany}
+        open={Boolean(dialogCompany)}
+        onOpenChange={(open) => {
+          if (!open) setDialogCompany(null);
+        }}
+        onSave={({ name, description, status, budgetMonthlyCents }) => {
+          if (!dialogCompany) return;
+          fullEditMutation.mutate({
+            id: dialogCompany.id,
+            payload: { name, description, status, budgetMonthlyCents },
+          });
+        }}
+        isPending={fullEditMutation.isPending}
+        error={fullEditMutation.error instanceof Error ? fullEditMutation.error : null}
+      />
     </div>
+  );
+}
+
+function EditCompanyModal({
+  company,
+  open,
+  onOpenChange,
+  onSave,
+  isPending,
+  error,
+}: {
+  company: Company | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSave: (payload: {
+    name: string;
+    description: string | null;
+    status: "active" | "paused" | "archived";
+    budgetMonthlyCents: number;
+  }) => void;
+  isPending: boolean;
+  error?: Error | null;
+}) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [status, setStatus] = useState<"active" | "paused" | "archived">("active");
+  const [budgetDollars, setBudgetDollars] = useState("");
+
+  useEffect(() => {
+    if (company) {
+      setName(company.name ?? "");
+      setDescription(company.description ?? "");
+      setStatus(company.status as "active" | "paused" | "archived");
+      setBudgetDollars(company.budgetMonthlyCents > 0 ? (company.budgetMonthlyCents / 100).toFixed(2) : "");
+    }
+  }, [company]);
+
+  if (!company) return null;
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    const parsedBudget = parseFloat(budgetDollars);
+    const budgetMonthlyCents = isNaN(parsedBudget) || parsedBudget < 0 ? 0 : Math.round(parsedBudget * 100);
+    onSave({
+      name: name.trim(),
+      description: description.trim() || null,
+      status,
+      budgetMonthlyCents,
+    });
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <DialogHeader>
+            <DialogTitle>Edit Organization</DialogTitle>
+            <DialogDescription>
+              Update organization settings for {company.name}.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-foreground">Name</label>
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Organization name"
+                required
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-foreground">Description</label>
+              <Textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Optional description"
+                rows={3}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-foreground">Status</label>
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value as "active" | "paused" | "archived")}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              >
+                <option value="active">Active</option>
+                <option value="paused">Paused</option>
+                <option value="archived">Archived</option>
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-foreground">Monthly Budget ($)</label>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="Unlimited (0.00)"
+                value={budgetDollars}
+                onChange={(e) => setBudgetDollars(e.target.value)}
+              />
+            </div>
+
+            {error && (
+              <p className="text-xs text-destructive">{error.message}</p>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={isPending}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={isPending || !name.trim()}>
+              {isPending ? "Saving..." : "Save changes"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

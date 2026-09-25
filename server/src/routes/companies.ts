@@ -1239,6 +1239,28 @@ export function companyRoutes(db: Db, storage?: StorageService, options?: Compan
       body = updateCompanyBrandingSchema.parse(req.body);
     } else {
       body = updateCompanySchema.parse(req.body);
+      const isInstanceAdminActor =
+        req.actor.type === "board" &&
+        (req.actor.source === "local_implicit" || Boolean(req.actor.isInstanceAdmin));
+      if (!isInstanceAdminActor) {
+        const HOST_MANAGED_COMPANY_FIELDS = new Set([
+          "budgetMonthlyCents",
+          "spentMonthlyCents",
+          "billingPricingMode",
+          "billingMarkupPercent",
+          "billingByokFeePerMillionCents",
+          "hideInternalCostFromClient",
+          "requireByok",
+        ]);
+        const disallowed = Object.keys(req.body as Record<string, unknown>).filter(
+          (key) => HOST_MANAGED_COMPANY_FIELDS.has(key),
+        );
+        if (disallowed.length > 0) {
+          throw forbidden(
+            `Only instance admins can modify company budget and billing settings (${disallowed.sort().join(", ")})`,
+          );
+        }
+      }
     }
 
     const existingCompany = await svc.getById(companyId);
@@ -1344,7 +1366,10 @@ export function companyRoutes(db: Db, storage?: StorageService, options?: Compan
 
   router.delete("/:companyId", async (req, res) => {
     const companyId = req.params.companyId as string;
-    assertCompanyAccess(req, companyId);
+    const isInstanceAdmin = req.actor.source === "local_implicit" || Boolean(req.actor.isInstanceAdmin);
+    if (!isInstanceAdmin) {
+      assertCompanyAccess(req, companyId);
+    }
     assertBoard(req);
     const company = await svc.remove(companyId);
     if (!company) {

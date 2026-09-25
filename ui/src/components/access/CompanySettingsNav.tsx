@@ -13,6 +13,7 @@ const items = [
   { value: "secrets", label: "Secrets", href: "/company/settings/secrets" },
   { value: "instance-profile", label: "Profile", href: `${INSTANCE_SETTINGS_PATH_PREFIX}/profile` },
   { value: "instance-environments", label: "Environments", href: `${INSTANCE_SETTINGS_PATH_PREFIX}/environments` },
+  { value: "instance-companies", label: "Organizations", href: `${INSTANCE_SETTINGS_PATH_PREFIX}/companies` },
   { value: "instance-access", label: "Access", href: `${INSTANCE_SETTINGS_PATH_PREFIX}/access` },
   { value: "instance-observability", label: "Observability", href: `${INSTANCE_SETTINGS_PATH_PREFIX}/observability` },
   { value: "instance-experimental", label: "Experimental", href: `${INSTANCE_SETTINGS_PATH_PREFIX}/experimental` },
@@ -30,6 +31,7 @@ const hiddenSettingKeyByTab: Partial<Record<CompanySettingsTab, string>> = {
   secrets: "company.secrets",
   "instance-profile": "instance.profile",
   "instance-environments": "instance.environments",
+  "instance-companies": "instance.companies",
   "instance-access": "instance.access",
   "instance-observability": "instance.observability",
   "instance-experimental": "instance.experimental",
@@ -44,6 +46,10 @@ export function getCompanySettingsTab(pathname: string): CompanySettingsTab {
 
   if (pathname.includes(`${INSTANCE_SETTINGS_PATH_PREFIX}/environments`)) {
     return "instance-environments";
+  }
+
+  if (pathname.includes(`${INSTANCE_SETTINGS_PATH_PREFIX}/companies`)) {
+    return "instance-companies";
   }
 
   if (pathname.includes(`${INSTANCE_SETTINGS_PATH_PREFIX}/access`)) {
