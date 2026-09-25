@@ -19,6 +19,7 @@ describe("agent detail navigation", () => {
       "permissions",
       "api-keys",
       "revisions",
+      "budget",
     ]);
   });
 

@@ -18,6 +18,7 @@ export const companies = pgTable(
     billingMarkupPercent: integer("billing_markup_percent").notNull().default(0),
     billingByokFeePerMillionCents: integer("billing_byok_fee_per_million_cents").notNull().default(0),
     hideInternalCostFromClient: boolean("hide_internal_cost_from_client").notNull().default(false),
+    requireByok: boolean("require_byok").notNull().default(false),
     defaultResponsibleUserId: text("default_responsible_user_id"),
     requireBoardApprovalForNewAgents: boolean("require_board_approval_for_new_agents")
       .notNull()

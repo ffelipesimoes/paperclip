@@ -2388,6 +2388,9 @@ export function agentRoutes(
 
   function resolveInstructionsFilePath(candidatePath: string, adapterConfig: Record<string, unknown>) {
     const trimmed = candidatePath.trim();
+    if (trimmed.includes("\0")) {
+      throw unprocessable("Invalid instructions path: contains null bytes");
+    }
     if (path.isAbsolute(trimmed)) return trimmed;
 
     const cwd = asNonEmptyString(adapterConfig.cwd);
@@ -2399,7 +2402,12 @@ export function agentRoutes(
     if (!path.isAbsolute(cwd)) {
       throw unprocessable("adapterConfig.cwd must be an absolute path to resolve relative instructions path");
     }
-    return path.resolve(cwd, trimmed);
+    const resolved = path.resolve(cwd, trimmed);
+    const relativeToCwd = path.relative(path.resolve(cwd), resolved);
+    if (relativeToCwd === ".." || relativeToCwd.startsWith(`..${path.sep}`)) {
+      throw unprocessable("Instructions file path must stay within cwd");
+    }
+    return resolved;
   }
 
   async function materializeDefaultInstructionsBundleForNewAgent<T extends {
@@ -4603,6 +4611,31 @@ export function agentRoutes(
     if (hasOwn(req.body as object, "permissions")) {
       res.status(422).json({ error: "Use /api/agents/:id/permissions for permission changes" });
       return;
+    }
+
+    const isInstanceAdminActor =
+      req.actor.type === "board" &&
+      (req.actor.source === "local_implicit" || Boolean(req.actor.isInstanceAdmin));
+    if (!isInstanceAdminActor) {
+      const TENANT_EDITABLE_AGENT_FIELDS = new Set([
+        "name",
+        "role",
+        "title",
+        "icon",
+        "reportsTo",
+        "capabilities",
+        "desiredSkills",
+        "metadata",
+        "status",
+      ]);
+      const disallowedKeys = Object.keys(req.body as Record<string, unknown>).filter(
+        (key) => !TENANT_EDITABLE_AGENT_FIELDS.has(key),
+      );
+      if (disallowedKeys.length > 0) {
+        throw forbidden(
+          `Only instance admins can modify host-managed agent fields (${disallowedKeys.sort().join(", ")})`,
+        );
+      }
     }
 
     const patchData = { ...(req.body as Record<string, unknown>) };

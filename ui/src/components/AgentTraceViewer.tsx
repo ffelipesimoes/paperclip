@@ -1,4 +1,5 @@
 import { useState, useMemo, type ComponentType } from "react";
+import { copyTextToClipboard } from "../lib/clipboard";
 import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
@@ -97,7 +98,7 @@ function CodeInspector({ title, data }: { title: string; data: unknown }) {
   if (!text) return null;
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(text);
+    void copyTextToClipboard(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

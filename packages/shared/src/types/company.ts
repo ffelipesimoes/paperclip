@@ -30,6 +30,7 @@ export interface Company {
   billingMarkupPercent: number;
   billingByokFeePerMillionCents: number;
   hideInternalCostFromClient: boolean;
+  requireByok: boolean;
   defaultResponsibleUserId: string | null;
   requireBoardApprovalForNewAgents: boolean;
   interactionResolverGovernance: InteractionResolverGovernance;

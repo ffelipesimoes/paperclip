@@ -1283,6 +1283,7 @@ export async function resolveExecutionRunAdapterConfig(input: {
   /** Audited class-3 values resolved by an internal credential broker. */
   trustedEnvProjection?: Record<string, string>;
   trustedEnvSecretKeys?: string[];
+  requireByok?: boolean;
 }) {
   const executionRunConfig = stripForbiddenEnvFromAdapterConfig(
     input.executionRunConfig,
@@ -1597,6 +1598,26 @@ export async function resolveExecutionRunAdapterConfig(input: {
     (input.environmentDriver ?? null) !== "sandbox"
   ) {
     const resolvedEnv = parseObject(resolvedConfig.env);
+    if (input.requireByok && !readNonEmptyString(resolvedEnv.OPENAI_API_KEY)) {
+      throw new ConfigurationIncompleteFailure(
+        `BYOK policy enforced: company requires Bring-Your-Own-Key. No OPENAI_API_KEY configured for agent; host subscription cannot be used.`,
+        {
+          configurationIncomplete: {
+            reason: "byok_credential_required",
+            companyId: input.companyId,
+            agentId: input.agentId ?? null,
+            issueId: input.issueId ?? null,
+            projectId: input.projectId ?? null,
+            routineId: input.routineId ?? null,
+            responsibleUserId: input.responsibleUserId ?? null,
+            adapterType: "codex_local",
+            requiredEnvKeys: ["OPENAI_API_KEY"],
+            effectiveCodexHome: null,
+            missingBindings: [],
+          },
+        },
+      );
+    }
     const readiness = await evaluateCodexCredentialReadiness({
       env: process.env,
       companyId: input.companyId,
@@ -1619,6 +1640,31 @@ export async function resolveExecutionRunAdapterConfig(input: {
             adapterType: "codex_local",
             requiredEnvKeys: ["OPENAI_API_KEY"],
             effectiveCodexHome: readiness.effectiveHome,
+            missingBindings: [],
+          },
+        },
+      );
+    }
+  }
+  if (
+    (input.adapterType ?? null) === "claude_local" &&
+    input.requireByok
+  ) {
+    const resolvedEnv = parseObject(resolvedConfig.env);
+    if (!readNonEmptyString(resolvedEnv.ANTHROPIC_API_KEY)) {
+      throw new ConfigurationIncompleteFailure(
+        `BYOK policy enforced: company requires Bring-Your-Own-Key. No ANTHROPIC_API_KEY configured for agent; host credentials cannot be used.`,
+        {
+          configurationIncomplete: {
+            reason: "byok_credential_required",
+            companyId: input.companyId,
+            agentId: input.agentId ?? null,
+            issueId: input.issueId ?? null,
+            projectId: input.projectId ?? null,
+            routineId: input.routineId ?? null,
+            responsibleUserId: input.responsibleUserId ?? null,
+            adapterType: "claude_local",
+            requiredEnvKeys: ["ANTHROPIC_API_KEY"],
             missingBindings: [],
           },
         },
@@ -18738,6 +18784,18 @@ export function heartbeatService(
         responsibleUserId,
         agentId: agent.id,
       })("https://github.com/paperclipai/credential-probe.git");
+      const companyRecord = await db
+        .select({
+          requireByok: companies.requireByok,
+          billingPricingMode: companies.billingPricingMode,
+        })
+        .from(companies)
+        .where(eq(companies.id, agent.companyId))
+        .then((rows) => rows[0] ?? null);
+      const isByokEnforced = Boolean(
+        companyRecord?.requireByok ||
+        companyRecord?.billingPricingMode === "byok_fee",
+      );
       const { resolvedConfig, secretKeys, secretManifest } =
         await resolveExecutionRunAdapterConfig({
           companyId: agent.companyId,
@@ -18745,6 +18803,7 @@ export function heartbeatService(
           adapterType: agent.adapterType,
           issueId,
           heartbeatRunId: run.id,
+          requireByok: isByokEnforced,
           environmentId: selectedEnvironmentForConfig?.id ?? null,
           environmentEnv: selectedEnvironmentForConfig?.envVars ?? null,
           environmentDriver: selectedEnvironmentForConfig?.driver ?? null,

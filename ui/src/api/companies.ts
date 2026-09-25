@@ -127,6 +127,7 @@ export const companiesApi = {
         | "billingMarkupPercent"
         | "billingByokFeePerMillionCents"
         | "hideInternalCostFromClient"
+        | "requireByok"
       >
     >,
   ) => api.patch<Company>(`/companies/${companyId}`, data),
