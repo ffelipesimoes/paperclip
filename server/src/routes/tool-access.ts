@@ -993,42 +993,12 @@ function connectorEnrollmentPrincipal(req: Request): string {
 
   router.get("/tools/oauth/cloud-connector/enrollment", async (req, res) => {
     assertBoard(req);
-    res.json(await reconcilePaperclipCloudConnectorEnrollmentStatus());
+    res.json({ configured: false, status: "disabled", origins: [] });
   });
 
   router.post("/tools/oauth/cloud-connector/enrollment", async (req, res) => {
     assertInstanceAdmin(req);
-    const companyId = typeof req.body?.companyId === "string" ? req.body.companyId : "";
-    if (!companyId) throw badRequest("Paperclip Cloud enrollment requires a company");
-    assertCompanyAccess(req, companyId);
-    const origin = new URL(oauthRedirectUri(req)).origin;
-    const returnTo = normalizeCloudConnectorEnrollmentReturnTo(
-      typeof req.body?.returnTo === "string" ? req.body.returnTo : undefined,
-    ) ?? undefined;
-    let status;
-    try {
-      status = await startPaperclipCloudConnectorEnrollment({
-        origin,
-        companyId,
-        initiatedBy: connectorEnrollmentPrincipal(req),
-        label: typeof req.body?.label === "string" ? req.body.label : undefined,
-        returnTo,
-      });
-    } catch {
-      throw unprocessable("Paperclip Cloud enrollment could not be started", {
-        code: "paperclip_cloud_connector_enrollment_failed",
-      });
-    }
-    await logActivity(db, {
-      companyId,
-      actorType: "user",
-      actorId: req.actor.userId ?? "board",
-      action: "paperclip_cloud_connector.enrollment_started",
-      entityType: "connector_instance",
-      entityId: status.instanceId ?? "pending",
-      details: { environment: status.environment, status: status.status },
-    });
-    res.status(201).json(status);
+    throw forbidden("Paperclip Cloud enrollment is disabled on this instance");
   });
 
   router.get("/tools/oauth/cloud-connector/enrollment-callback", async (req, res) => {
