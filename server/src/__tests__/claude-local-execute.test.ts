@@ -767,6 +767,7 @@ describe("claude execute", () => {
           cwd: workspace,
           env: {
             PAPERCLIP_TEST_CAPTURE_PATH: capturePath,
+            CLAUDE_CONFIG_DIR: claudeConfigDir,
           },
           promptTemplate: "Follow the paperclip heartbeat.",
         },

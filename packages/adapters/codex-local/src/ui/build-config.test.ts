@@ -106,7 +106,7 @@ describe("buildPaperclipRunnerConfig", () => {
       codexPermissionMode: "never",
       lifecycleMode: "per_turn",
       model: "gpt-5.4",
-      timeoutSec: 0,
+      timeoutSec: 600,
       graceSec: 15,
     });
     for (const unsupportedKey of [
