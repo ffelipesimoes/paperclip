@@ -15,6 +15,7 @@ import {
   completionContracts,
   createDb,
   heartbeatRuns,
+  instanceSettings,
   nativeRunFinalizations,
   nativeRunResults,
   statusDecisions,
@@ -31,6 +32,7 @@ import {
   unregisterServerAdapter,
 } from "../adapters/index.js";
 import { heartbeatService } from "../services/heartbeat.js";
+import { instanceSettingsService, invalidateInstanceSettingsCache } from "../services/instance-settings.js";
 
 const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();
 const describeEmbeddedPostgres = embeddedPostgresSupport.supported
@@ -101,6 +103,8 @@ describeEmbeddedPostgres("direct adapter native-runner isolation", () => {
     );
     expect(pendingRuns).toEqual([]);
     vi.clearAllMocks();
+    await db.delete(instanceSettings);
+    invalidateInstanceSettingsCache(db as object);
     await db.execute(
       sql.raw(`
       TRUNCATE TABLE
