@@ -173,7 +173,7 @@ describe("Security Audit Remediation", () => {
       const app = createTestApp(instanceAdminActor);
       const res = await request(app)
         .patch("/api/instance/settings")
-        .send({ logRetentionDays: 30 });
+        .send({ defaultEnvironmentId: null });
 
       expect(res.status).toBe(200);
       expect(mockInstanceSettingsService.update).toHaveBeenCalled();
