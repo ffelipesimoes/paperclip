@@ -16,8 +16,47 @@
   ],
   "methods": [
     {
+      "key": "mcp-key",
+      "label": "Personal Access Token (PAT)",
+      "transport": "mcp_remote",
+      "auth": "api_key",
+      "grantKinds": [
+        "user",
+        "organization",
+        "agent"
+      ],
+      "ownershipModes": [
+        "customer"
+      ],
+      "whenToUse": "Conecte seu repositório GitHub com um Personal Access Token (PAT) pessoal ou fornecido pelo seu mentor/time.",
+      "defaults": {
+        "serverUrl": "https://api.githubcopilot.com/mcp/"
+      },
+      "guidanceMd": "Insira seu GitHub Personal Access Token (PAT) com escopo `repo`. Caso esteja em treinamento, onboarding ou não possua acesso ao repositório da organização, solicite o token ou as permissões necessárias diretamente ao seu mentor ou líder técnico. Consulte o guia em `doc/guides/GITHUB-PAT-SETUP.md` para instruções passo a passo.",
+      "riskTier": "S3",
+      "credentialFields": [
+        {
+          "key": "authorization",
+          "label": "GitHub token",
+          "type": "password",
+          "required": true,
+          "placeholder": "ghp_... ou github_pat_...",
+          "secret": true
+        }
+      ],
+      "keyPlacement": {
+        "location": "header",
+        "name": "Authorization",
+        "prefix": "Bearer "
+      },
+      "requiredResourceFilters": [
+        "organization",
+        "repository"
+      ]
+    },
+    {
       "key": "managed",
-      "label": "Connect with GitHub",
+      "label": "Connect with GitHub (Managed Cloud)",
       "transport": "mcp_remote",
       "auth": "oauth",
       "oauthStrategy": "paperclip_cloud_connector",
@@ -29,49 +68,15 @@
       "ownershipModes": [
         "platform_shared"
       ],
-      "whenToUse": "Connect your GitHub account for durable MCP, shell Git, gh, and repository access.",
+      "whenToUse": "Connect your GitHub account via Paperclip Cloud.",
       "defaults": {
         "serverUrl": "https://api.githubcopilot.com/mcp/"
       },
-      "guidanceMd": "Authorize Paperclip, then choose selected repositories in GitHub. You can edit repository access later from GitHub's installation settings.",
+      "guidanceMd": "Authorize Paperclip, then choose selected repositories in GitHub.",
       "warnings": [
         "Shell Git and gh receive this identity for the run and are not constrained by per-tool Ask-first controls."
       ],
       "riskTier": "S3",
-      "requiredResourceFilters": [
-        "organization",
-        "repository"
-      ]
-    },
-    {
-      "key": "mcp-key",
-      "label": "Personal access token (advanced)",
-      "transport": "mcp_remote",
-      "auth": "api_key",
-      "ownershipModes": [
-        "customer"
-      ],
-      "whenToUse": "Use the provider-hosted connection for the quickest setup.",
-      "defaults": {
-        "serverUrl": "https://api.githubcopilot.com/mcp/"
-      },
-      "guidanceMd": "Create a fine-grained token limited to the repositories agents should use.",
-      "riskTier": "S3",
-      "credentialFields": [
-        {
-          "key": "authorization",
-          "label": "GitHub token",
-          "type": "password",
-          "required": true,
-          "placeholder": "github_pat_...",
-          "secret": true
-        }
-      ],
-      "keyPlacement": {
-        "location": "header",
-        "name": "Authorization",
-        "prefix": "Bearer "
-      },
       "requiredResourceFilters": [
         "organization",
         "repository"

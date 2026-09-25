@@ -710,41 +710,24 @@ describe("AppsConnect — Connect with a link (M4 frame)", () => {
     await render();
     await passAccessStep();
 
-    expect(container.textContent).toContain("Connect with Paperclip");
-    expect(container.textContent).toContain(
-      "You must connect this instance to Paperclip to connect to Gmail (you only need to do this once).",
+    expect(container.textContent).not.toContain("Connect with Paperclip");
+    expect(container.textContent).not.toContain(
+      "You must connect this instance to Paperclip to connect to Gmail",
     );
-    expect(buttonByText("Connect with Paperclip")?.closest(".rounded-xl")?.classList.contains("border-border")).toBe(true);
-    expect(container.textContent).not.toContain("Required once for managed Google sign-in.");
-    expect(container.textContent).not.toContain("Your OAuth app");
-
-    await act(async () => {
-      buttonByText("Connect with Paperclip")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    await flushReact();
-
-    expect(startCloudConnectorEnrollmentMock).toHaveBeenCalledWith(
-      "company-1",
-      "Paperclip",
-      "/apps/connect?source=gmail&stage=setup",
-    );
-    expect(navigateTopLevelMock).toHaveBeenCalledWith(
-      "https://my-staging.paperclip.app/connections/enroll?id=enroll-test",
-    );
+    expect(container.textContent).toContain("Review requirements");
   });
 
-  it("keeps GitHub's personal identity defaults while its managed method awaits enrollment", async () => {
+  it("connects GitHub directly via PAT without cloud enrollment", async () => {
     mockParams.appKey = "github";
     listGalleryMock.mockResolvedValue({
       apps: [{
         ...GITHUB,
-        methods: GITHUB.methods.filter((method) => !method.oauthStrategy),
         ownershipAvailability: { platform_shared: false, customer: true, dcr: true },
       }],
     });
     getCloudConnectorEnrollmentMock.mockResolvedValueOnce({
       configured: false,
-      status: "not_configured",
+      status: "disabled",
       brokerBaseUrl: "https://my-staging.paperclip.app",
       instanceId: null,
       environment: "staging",
@@ -753,51 +736,27 @@ describe("AppsConnect — Connect with a link (M4 frame)", () => {
 
     await render();
 
-    expect(container.textContent).toContain("Access   ·   Sign in");
+    expect(container.textContent).toContain("Access   ·   Add your key");
     expect(radioContaining("My GitHub account")?.getAttribute("aria-checked")).toBe("true");
     expect(radioContaining("Any agent")?.getAttribute("aria-checked")).toBe("true");
     expect(container.textContent).toContain("Which agents may use your GitHub when you’re responsible?");
 
     await passAccessStep();
 
-    expect(container.textContent).toContain("Connect with Paperclip");
-    expect(container.textContent).not.toContain("GitHub token");
-  });
-
-  it("restores the setup step after the one-time enrollment callback", async () => {
-    mockSearch.value = "source=github&stage=setup&cloud_connector=enrolled";
-    listGalleryMock.mockResolvedValueOnce({ apps: [GITHUB_MANAGED] });
-
-    await render();
-
-    expect(container.textContent).toContain("Step 2 of 2");
-    expect(container.textContent).toContain("Continue to GitHub");
-    expect(container.textContent).not.toContain("Connect GitHub as");
     expect(container.textContent).not.toContain("Connect with Paperclip");
+    expect(container.textContent).toContain("Your GitHub key");
   });
 
-  it("preserves a dedicated agent identity across the full-page enrollment callback", async () => {
+  it("connects GitHub directly with dedicated agent identity", async () => {
     mockParams.appKey = "github";
     listGalleryMock.mockResolvedValue({
-      apps: [{
-        ...GITHUB,
-        methods: GITHUB.methods.filter((method) => !method.oauthStrategy),
-        ownershipAvailability: { platform_shared: false, customer: true, dcr: true },
-      }],
+      apps: [GITHUB],
       capabilities: {
         canCreateOrganizationGrant: true,
         organizationGrantReason: null,
         canSetCompanyInstall: true,
         companyInstallReason: null,
       },
-    });
-    getCloudConnectorEnrollmentMock.mockResolvedValue({
-      configured: false,
-      status: "not_configured",
-      brokerBaseUrl: "https://my-staging.paperclip.app",
-      instanceId: null,
-      environment: "staging",
-      origins: [],
     });
 
     await render();
@@ -820,60 +779,15 @@ describe("AppsConnect — Connect with a link (M4 frame)", () => {
       accessContinue?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     await flushReact();
-    await act(async () => {
-      buttonByText("Connect with Paperclip")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
+
+    expect(container.textContent).not.toContain("Connect with Paperclip");
+    expect(container.textContent).toContain("Your GitHub key");
+
+    const keyField = container.querySelector<HTMLInputElement>("input[type=password]");
+    await act(async () => setInputValue(keyField!, "agent-pat-token"));
     await flushReact();
-
-    expect(JSON.parse(window.sessionStorage.getItem(
-      "paperclip.connector-enrollment-access:github",
-    ) ?? "null")).toEqual({
-      companyId: "company-1",
-      grantKind: "agent",
-      installChoice: "specific",
-      agentIds: ["agent-1"],
-    });
-
-    await act(async () => mountedRoot?.unmount());
-    mountedRoot = null;
-    container.innerHTML = "";
-    mockParams.appKey = undefined;
-    mockSearch.value = "source=github&stage=setup&cloud_connector=enrolled";
-    mockCompany.value = { selectedCompanyId: undefined, selectedCompany: null };
-    listGalleryMock.mockResolvedValue({ apps: [GITHUB_MANAGED] });
-    getCloudConnectorEnrollmentMock.mockResolvedValue({
-      configured: true,
-      status: "active",
-      brokerBaseUrl: "https://my-staging.paperclip.app",
-      instanceId: "inst-test",
-      environment: "staging",
-      origins: ["https://paperclip.example.test"],
-    });
-
-    const coldLoadClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    await render(coldLoadClient);
-
-    expect(window.sessionStorage.getItem("paperclip.connector-enrollment-access:github")).toBeNull();
-    mockCompany.value = {
-      selectedCompanyId: "company-1",
-      selectedCompany: { id: "company-1", name: "Paperclip" },
-    };
     await act(async () => {
-      mountedRoot?.render(
-        <QueryClientProvider client={coldLoadClient}>
-          <AppsConnect />
-        </QueryClientProvider>,
-      );
-    });
-    await flushReact();
-    await flushReact();
-
-    expect(container.textContent).toContain("Step 2 of 2");
-    expect(window.sessionStorage.getItem(
-      "paperclip.connector-enrollment-access:github",
-    )).toBeNull();
-    await act(async () => {
-      buttonByText("Continue to GitHub")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      buttonByText("Connect")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     await flushReact();
 
@@ -2409,7 +2323,7 @@ describe("AppsConnect — Connect with a link (M4 frame)", () => {
     expect(connectAppMock).toHaveBeenCalledTimes(1);
     expect(mockNavigate).toHaveBeenCalledWith("/apps/connect?source=github");
     const [, input] = connectAppMock.mock.calls[0];
-    expect(input).toMatchObject({ galleryKey: "github", name: "GitHub for the company" });
+    expect(input).toMatchObject({ galleryKey: "github", name: "GitHub" });
   });
 
   it("continues an exact credential-based draft instead of creating a replacement", async () => {
@@ -2474,7 +2388,7 @@ describe("AppsConnect — Connect with a link (M4 frame)", () => {
     const [, input] = connectAppMock.mock.calls[0];
     expect(input).toMatchObject({
       galleryKey: "github",
-      name: "GitHub for the company",
+      name: "GitHub",
     });
   });
 

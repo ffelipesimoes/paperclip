@@ -1,9 +1,7 @@
 # GitHub managed connection
 
-GitHub is a Paperclip Cloud-managed GitHub App connection with an advanced PAT
-compatibility method. Cloud owns the fixed public OAuth callback and signed
-webhook inbox; provider tokens are sealed to the enrolled instance and stored
-only in its existing encrypted secret system.
+GitHub supports direct connection via Personal Access Token (PAT) as well as managed connection.
+For user and mentor setup instructions, see [GitHub PAT Setup Guide](../guides/GITHUB-PAT-SETUP.md).
 
 ## Identity resolution
 

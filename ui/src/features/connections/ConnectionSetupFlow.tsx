@@ -819,24 +819,12 @@ export function ConnectionSetupFlow({
       || candidate.oauthStrategy === "paperclip_id_connector"
     ),
   );
-  // Before a self-hosted instance enrolls, the server intentionally withholds
-  // platform-managed methods from the advertised gallery. The setup route still
-  // needs the managed method's identity model, labels, and defaults because the
-  // next step is enrollment for that exact method—not the visible PAT/BYO
-  // compatibility fallback.
-  const preEnrollmentManagedMethod = entry
-    && requestedDefinitionUsesManagedConnector
-    && !entryAdvertisesManagedConnector
-    ? recommendedManagedConnectorMethod(fullRequestedDefinition)
-    : null;
+  // Self-hosted instance does not force Paperclip Cloud connector enrollment.
+  const preEnrollmentManagedMethod = null;
   const connectorEnrollmentQuery = useQuery({
     queryKey: ["cloud-connector", "enrollment"],
     queryFn: () => toolsApi.getCloudConnectorEnrollment(),
-    enabled: Boolean(
-      selectedCompanyId
-      && requestedDefinitionUsesManagedConnector
-      && !entryAdvertisesManagedConnector
-    ),
+    enabled: false,
   });
   const [connectorEnrollmentError, setConnectorEnrollmentError] = useState<string | null>(null);
   const preserveEnrollmentAccess = useCallback(() => {
@@ -1662,17 +1650,8 @@ export function ConnectionSetupFlow({
     && (directOAuthEntry || oauthPhase !== "entry"),
   );
 
-  const showConnectorEnrollmentStep = Boolean(
-    step === "key"
-    && entry
-    && requestedDefinitionUsesManagedConnector
-    && !entryAdvertisesManagedConnector
-    && (
-      connectorEnrollmentQuery.isLoading
-      || connectorEnrollmentQuery.isError
-      || connectorEnrollmentQuery.data?.configured !== true
-    )
-  );
+  // Cloud connector enrollment screen is disabled so users are not pushed to Paperclip Cloud.
+  const showConnectorEnrollmentStep = false;
 
   if (showCuratedOAuthState && automaticOAuthEntry) {
     return (
