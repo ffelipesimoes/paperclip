@@ -60,6 +60,7 @@ import { issuesApi } from "../api/issues";
 import { projectsApi } from "../api/projects";
 import { environmentsApi } from "../api/environments";
 import { instanceSettingsApi } from "../api/instanceSettings";
+import { teamCatalogApi } from "../api/teamCatalog";
 import {
   resolveAdapterTestEnvironmentId,
   resolveLocalDefaultEnvironmentId,
@@ -129,6 +130,7 @@ import { AgentPreview } from "./onboarding/AgentPreview";
 import { ModelSourceTiles, type CredentialMode } from "./onboarding/ModelSourceTiles";
 import { CredentialModeLink } from "./onboarding/CredentialModeLink";
 import { FooterNav, type FooterPrimaryIcon } from "./onboarding/FooterNav";
+import { SquadTemplateSelector, SQUAD_TEMPLATES } from "./onboarding/SquadTemplateSelector";
 import { OnboardingHeading } from "./onboarding/OnboardingPrimitives";
 import { DEFAULT_AGENT_ROLE } from "../lib/onboarding-agent-role";
 import { capsuleHeroMotion } from "./onboarding/onboarding-motion";
@@ -740,6 +742,9 @@ function OnboardingWizardInner({
   const [createdIssueRef, setCreatedIssueRef] = useState<string | null>(
     (saved?.createdIssueRef as string) ?? null
   );
+  const [selectedSquadTemplate, setSelectedSquadTemplate] = useState<string>(
+    (saved?.selectedSquadTemplate as string) ?? "product-engineering"
+  );
 
   // The company the *route* last supplied, so a navigation that stops naming
   // one can drop it without touching a company the wizard created itself.
@@ -969,6 +974,7 @@ function OnboardingWizardInner({
       credentialMode,
       createdCompanyId, createdCompanyPrefix, createdAgentId,
       createdCompanyGoalId, createdProjectId, createdIssueRef,
+      selectedSquadTemplate,
       onboardingPath, growWorkflows, growPainPoints, growAutomate,
     };
     onboardingDraftStorage.write(JSON.stringify(state));
@@ -978,6 +984,7 @@ function OnboardingWizardInner({
     credentialMode,
     createdCompanyId, createdCompanyPrefix, createdAgentId,
     createdCompanyGoalId, createdProjectId, createdIssueRef,
+    selectedSquadTemplate,
     onboardingPath, growWorkflows, growPainPoints, growAutomate,
   ]);
 
@@ -1709,6 +1716,8 @@ function OnboardingWizardInner({
       if (!stillTheSameCompany(createdCompanyId)) return;
 
       const prefix = createdCompanyPrefix;
+      // Define o gatilho para iniciar o tour interativo no primeiro acesso
+      localStorage.setItem(`paperclip_start_tour_${createdCompanyId}`, "true");
       // Select the new company as a route sync, not a manual switch: the
       // explicit navigate below is the intended destination, so page-memory's
       // "restore last page" (which falls back to /dashboard) must not fire and
@@ -2246,6 +2255,53 @@ function OnboardingWizardInner({
       // path that clears the role must not reach a hire that silently no-ops.
       if (!agentRole) return;
 
+      // Se um template de Squad foi selecionado (ex: TI, Vendas, Marketing),
+      // provisionamos a equipe completa através do catálogo de times
+      const squad = SQUAD_TEMPLATES.find((s) => s.id === selectedSquadTemplate);
+      if (squad && squad.catalogSlug) {
+        const adapterOverrides: Record<
+          string,
+          { adapterType: string; adapterConfig?: Record<string, unknown> }
+        > = {};
+        for (const a of squad.agents) {
+          adapterOverrides[a.slug] = {
+            adapterType,
+            adapterConfig: hireAdapterConfig,
+          };
+        }
+
+        const installResult = await teamCatalogApi.install(
+          createdCompanyId,
+          squad.catalogSlug,
+          { adapterOverrides },
+        );
+
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.agents.list(createdCompanyId),
+        });
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.projects.list(createdCompanyId),
+        });
+
+        const rootSlug = squad.agents[0]?.slug;
+        const rootAgent =
+          installResult.portabilityImport.agents.find((a) => a.slug === rootSlug) ??
+          installResult.portabilityImport.agents.find((a) => a.id != null);
+        const primaryAgentId = rootAgent?.id ?? null;
+
+        if (installResult.portabilityImport.projects?.[0]?.id) {
+          setCreatedProjectId(installResult.portabilityImport.projects[0].id);
+        }
+
+        if (primaryAgentId) {
+          setCreatedAgentId(primaryAgentId);
+        }
+
+        if (!stillTheSameCompany(createdCompanyId)) return;
+        setStep(5);
+        return;
+      }
+
       const hire = await agentsApi.hire(createdCompanyId, {
         // The name is optional; an agent that reaches here without one is
         // named for the job it was hired to do rather than left blank.
@@ -2633,6 +2689,8 @@ function OnboardingWizardInner({
                       lede={
                         step === 3 ? undefined : step === 4 ? (
                           <>Paperclip works with your subscription or API keys.</>
+                        ) : selectedSquadTemplate !== "solo" ? (
+                          <>{SQUAD_TEMPLATES.find((s) => s.id === selectedSquadTemplate)?.name ?? "Seu squad"} está pronto para agir!</>
                         ) : (
                           <>{agentName.trim() || "Your first agent"} is ready to work!</>
                         )
@@ -3325,10 +3383,44 @@ function OnboardingWizardInner({
                       />
                     </div>
                   )}
+
+                  {/* Seletor de Squad Template para o token configurado */}
+                  <div className="pt-4 border-t border-border/70">
+                    <SquadTemplateSelector
+                      selectedTemplateId={selectedSquadTemplate}
+                      onSelectTemplate={setSelectedSquadTemplate}
+                    />
+                  </div>
                 </div>
               )}
 
               {/* Step 5: Review — lead is online (shared capsule above) */}
+              {step === 5 && selectedSquadTemplate !== "solo" && (
+                <div className="rounded-lg border border-border/70 bg-card p-4 space-y-3 animate-in fade-in duration-300">
+                  <div className="flex items-center justify-between border-b border-border/50 pb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-foreground">
+                        {SQUAD_TEMPLATES.find((s) => s.id === selectedSquadTemplate)?.name}
+                      </span>
+                      <span className="rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 px-2 py-0.5 text-(length:--text-nano) font-medium">
+                        Provisionado com sucesso
+                      </span>
+                    </div>
+                    <span className="text-(length:--text-micro) text-muted-foreground">
+                      {SQUAD_TEMPLATES.find((s) => s.id === selectedSquadTemplate)?.agentCount} agentes configurados
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {SQUAD_TEMPLATES.find((s) => s.id === selectedSquadTemplate)?.agents.map((agent) => (
+                      <div key={agent.slug} className="flex items-center gap-2 rounded-md border border-border/50 bg-muted/20 px-2.5 py-1.5 text-xs">
+                        <div className="size-2 rounded-full bg-emerald-500" />
+                        <span className="font-medium text-foreground">{agent.name}</span>
+                        <span className="text-muted-foreground text-(length:--text-micro)">— {agent.roleLabel}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               {/* Step 5: nothing. The heading names the agent and says it is
                   ready, and the pill above has just woken to show it — a
                   checklist restating those in three rows only asked the

@@ -155,6 +155,7 @@ export function Sidebar() {
               <button
                 onClick={() => openNewIssue()}
                 data-slot="icon-button"
+                data-tour="new-issue"
                 aria-label={rail ? "New Task" : undefined}
                 className={cn(
                   "flex items-center gap-2.5 mx-2 rounded-lg px-2 py-1.5 pointer-coarse:py-1 text-(length:--text-compact) font-medium text-foreground/80 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
@@ -206,7 +207,7 @@ export function Sidebar() {
         </div>
 
         <SidebarSection label="Work" collapsible={{ open: workOpen, onOpenChange: setWorkOpen }}>
-          <SidebarNavItem to="/issues" label="Tasks" icon={CircleCheck} />
+          <SidebarNavItem to="/issues" label="Tasks" icon={CircleCheck} dataTour="issues" />
           {streamlinedUiEnabled ? (
             <>
               <SidebarNavItem to="/projects" label="Projects" icon={FolderOpen} />
@@ -253,10 +254,10 @@ export function Sidebar() {
             label="Org"
             collapsible={{ open: organizationOpen, onOpenChange: setOrganizationOpen }}
           >
-            <SidebarNavItem to="/agents" label="Agents" icon={Users} />
+            <SidebarNavItem to="/agents" label="Agents" icon={Users} dataTour="agents" />
             <SidebarNavItem to="/skills" label="Skills" icon={Boxes} />
             <SidebarNavItem to="/apps" label="Connectors" icon={Unplug} />
-            <SidebarNavItem to="/activity" label="Audit" icon={History} />
+            <SidebarNavItem to="/activity" label="Audit" icon={History} dataTour="activity" />
             <SidebarNavItem
               to="/company/settings/instance/observability"
               label="Observability"
@@ -293,7 +294,9 @@ export function Sidebar() {
         ) : (
           <>
             <SidebarProjects />
-            <SidebarAgents />
+            <div data-tour="agents">
+              <SidebarAgents />
+            </div>
             <SidebarSection
               label="Organization"
               collapsible={{ open: organizationOpen, onOpenChange: setOrganizationOpen }}
