@@ -257,6 +257,7 @@ export interface AgentRunTrace {
   durationMs: number;
   totalTokens: number;
   simulatedCostCents: number;
+  privacyMode?: "sanitized" | "full";
   nodes: AgentTraceNode[];
 }
 
@@ -337,6 +338,24 @@ export interface InstanceObservabilitySummary {
   agents: AgentComputeUsage[];
   companies: CompanyComputeUsage[];
   forecast?: ComputeForecast;
+  recommendations?: ObservabilityOptimizationRecommendation[];
+  privacyMode?: "sanitized" | "full";
+}
+
+export interface ObservabilityOptimizationRecommendation {
+  id: string;
+  category: "prompt_caching" | "watchdog_tuning" | "model_rightsizing" | "budget_alert";
+  title: string;
+  description: string;
+  companyId?: string | null;
+  companyName?: string | null;
+  companyPrefix?: string | null;
+  agentId?: string | null;
+  agentName?: string | null;
+  impact: "high" | "medium" | "low";
+  estimatedMonthlySavingsCents?: number;
+  actionKey: string;
+  actionLabel: string;
 }
 
 export interface ComputeForecast {

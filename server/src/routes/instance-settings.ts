@@ -28,6 +28,7 @@ import {
   type HostComputeResources,
   type InstanceObservabilitySummary,
   type ModelComputeUsage,
+  type ObservabilityOptimizationRecommendation,
   type TaskCostDetail,
 } from "@paperclipai/shared";
 import { forbidden } from "../errors.js";
@@ -103,6 +104,20 @@ function publishActivitiesBestEffort(publications: ActivityPublication[], action
 
 function assertCanManageInstanceSettings(req: Request) {
   assertInstanceAdmin(req);
+}
+
+function assertCanViewInstanceObservability(req: Request) {
+  if (req.actor.type !== "board") {
+    throw forbidden("Board access required");
+  }
+  if (
+    req.actor.source === "local_implicit" ||
+    req.actor.isInstanceAdmin ||
+    req.actor.memberships?.some((m) => m.membershipRole === "owner" || m.membershipRole === "admin")
+  ) {
+    return;
+  }
+  throw forbidden("Instance admin or company owner access required");
 }
 
 // A task-drain start or stop reads the live drain state, writes an audit
@@ -434,7 +449,7 @@ export function instanceSettingsRoutes(db: Db) {
   });
 
   router.get("/instance/observability", async (req, res) => {
-    assertCanManageInstanceSettings(req);
+    assertCanViewInstanceObservability(req);
     const windowParam = typeof req.query.window === "string" ? req.query.window.toLowerCase() : "all";
     const companyIdParam =
       typeof req.query.companyId === "string" &&
@@ -1119,6 +1134,114 @@ export function instanceSettingsRoutes(db: Db) {
       currentMtdCostCents,
     };
 
+    const privacyParam =
+      typeof req.query.privacy === "string" && req.query.privacy.toLowerCase() === "sanitized"
+        ? "sanitized"
+        : "full";
+
+    const recommendations: ObservabilityOptimizationRecommendation[] = [];
+
+    // 1. Prompt Caching
+    if (totalInputTokens > 100_000 && cacheHitRate < 50) {
+      const estimatedSavings = Math.round(simulatedCostCents * 0.25);
+      recommendations.push({
+        id: "rec-prompt-cache-global",
+        category: "prompt_caching",
+        title: "Ativar / Aumentar Prompt Caching de Instruções",
+        description: `Taxa global de cache hit em ${cacheHitRate.toFixed(1)}%. Padronizar system prompts e habilitar prompt caching reduz até 90% dos tokens de entrada repetitivos.`,
+        impact: "high",
+        estimatedMonthlySavingsCents: estimatedSavings > 0 ? estimatedSavings : 15000,
+        actionKey: "enable_prompt_caching",
+        actionLabel: "Verificar Diretrizes de Cache",
+      });
+    }
+
+    for (const a of agentList) {
+      const agentTotalIn = a.inputTokens + a.cachedInputTokens;
+      const agentCacheRate = agentTotalIn > 0 ? Math.round((a.cachedInputTokens / agentTotalIn) * 100) : 0;
+      if (agentTotalIn > 150_000 && agentCacheRate < 30) {
+        recommendations.push({
+          id: `rec-cache-${a.agentId}`,
+          category: "prompt_caching",
+          title: `Otimizar Caching no Agente ${a.agentName}`,
+          description: `O agente ${a.agentName} (${a.companyName}) tem apenas ${agentCacheRate}% de cache hit em ${a.runCount} execuções.`,
+          companyId: a.companyId,
+          companyName: a.companyName,
+          companyPrefix: a.companyPrefix,
+          agentId: a.agentId,
+          agentName: a.agentName,
+          impact: "medium",
+          estimatedMonthlySavingsCents: Math.round(a.simulatedCostCents * 0.3),
+          actionKey: "optimize_agent_cache",
+          actionLabel: "Ajustar Prompt do Agente",
+        });
+        if (recommendations.length >= 4) break;
+      }
+    }
+
+    // 2. Budget Alert
+    if (forecast.budgetStatus === "exceeding_budget" || (forecast.projectedBudgetUtilizationPercent ?? 0) >= 80) {
+      recommendations.push({
+        id: "rec-budget-alert",
+        category: "budget_alert",
+        title: companyIdParam ? "Alerta de Consumo Crítico de Orçamento" : "Tenants Próximos ao Limite Mensal",
+        description: `Projeção de atingir ${forecast.projectedBudgetUtilizationPercent ?? 100}% do teto mensal antes do fim do período. Avalie expansão de quota ou política de hard-stop.`,
+        impact: "high",
+        actionKey: "review_budget",
+        actionLabel: "Revisar Limites de Quota",
+      });
+    }
+
+    // 3. Watchdog Tuning
+    const longRunningAgents = agentList.filter((a) => a.avgDurationMs > 180_000 && a.runCount >= 5);
+    if (longRunningAgents.length > 0) {
+      const slowest = longRunningAgents[0];
+      recommendations.push({
+        id: `rec-watchdog-${slowest.agentId}`,
+        category: "watchdog_tuning",
+        title: `Calibrar Timeout de Watchdog para ${slowest.agentName}`,
+        description: `O agente ${slowest.agentName} possui duração média de ${Math.round(slowest.avgDurationMs / 1000)}s por run. Ajustar watchdog previne execuções zumbis e desperdício de concorrência.`,
+        companyId: slowest.companyId,
+        companyName: slowest.companyName,
+        companyPrefix: slowest.companyPrefix,
+        agentId: slowest.agentId,
+        agentName: slowest.agentName,
+        impact: "medium",
+        actionKey: "tune_watchdog",
+        actionLabel: "Calibrar Watchdog",
+      });
+    }
+
+    // 4. Model Right-Sizing
+    const hasHeavyModels = modelList.some((m) => m.model.toLowerCase().includes("opus") || m.model.toLowerCase().includes("sonnet"));
+    if (hasHeavyModels && allTasks.length > 10) {
+      recommendations.push({
+        id: "rec-model-rightsizing",
+        category: "model_rightsizing",
+        title: "Avaliar Downgrade de Tarefas Mecânicas para Modelos Menores",
+        description: "Tarefas de classificação, roteamento ou triagem básica podem ser executadas com Claude 3.5 Haiku ou GPT-4o-mini com custo até 80% menor.",
+        impact: "low",
+        estimatedMonthlySavingsCents: 8500,
+        actionKey: "model_routing",
+        actionLabel: "Configurar Roteamento Inteligente",
+      });
+    }
+
+    let sanitizedTasks = allTasks;
+    let sanitizedCostlyTasks = costlyTasks;
+
+    if (privacyParam === "sanitized") {
+      sanitizedTasks = allTasks.map((t) => ({
+        ...t,
+        issueTitle: `${t.companyPrefix}-${t.issueNumber ?? "TASK"} [Work Package: ${t.originKind || "Standard"}]`,
+        createdByUserId: t.createdByUserId ? "user_sanitized" : null,
+      }));
+      sanitizedCostlyTasks = costlyTasks.map((t) => ({
+        ...t,
+        issueTitle: `${t.companyPrefix}-TASK [Work Package: Sanitized]`,
+      }));
+    }
+
     const summary: InstanceObservabilitySummary = {
       window: windowParam,
       selectedCompanyId: companyIdParam ?? "all",
@@ -1146,10 +1269,12 @@ export function instanceSettingsRoutes(db: Db) {
       models: modelList,
       timeline,
       forecast,
-      costlyTasks,
-      tasks: allTasks,
+      costlyTasks: sanitizedCostlyTasks,
+      tasks: sanitizedTasks,
       agents: agentList,
       companies: companyList,
+      recommendations,
+      privacyMode: privacyParam,
     };
 
     res.json(summary);
@@ -1400,12 +1525,44 @@ export function instanceSettingsRoutes(db: Db) {
       }
     }
 
+    const privacyParam =
+      typeof req.query.privacy === "string" && req.query.privacy.toLowerCase() === "sanitized"
+        ? "sanitized"
+        : "full";
+
+    const sanitizeTreeNodes = (list: AgentTraceNode[]) => {
+      for (const node of list) {
+        if (node.kind === "thought") {
+          node.output = "[Raciocínio interno mascarado em conformidade com Zero-PII / SOC 2]";
+        } else if (node.kind === "tool_call") {
+          node.input = { status: "sanitized", note: "Payload de entrada protegido" };
+          node.output = { status: "sanitized", note: "Payload de saída protegido" };
+        } else if (node.kind === "subagent") {
+          node.input = "[Prompt de sub-agente mascarado]";
+          node.output = "[Resposta de sub-agente mascarada]";
+        } else if (node.kind === "message") {
+          node.output = "[Conteúdo da mensagem mascarado sob política Zero-PII]";
+        }
+        if (node.children && node.children.length > 0) {
+          sanitizeTreeNodes(node.children);
+        }
+      }
+    };
+
+    const finalNodes = nodes.length > 0 ? nodes : rawNodes;
+    if (privacyParam === "sanitized") {
+      sanitizeTreeNodes(finalNodes);
+    }
+
     const trace: AgentRunTrace = {
       runId: run.id,
       agentId: run.agentId,
       agentName: run.agentName ?? "Agent",
       issueId: run.issueId ?? null,
-      issueTitle: run.issueTitle ?? null,
+      issueTitle:
+        privacyParam === "sanitized" && run.issueTitle
+          ? `${run.companyPrefix ?? "TASK"}-RUN [Sanitized Work Item]`
+          : (run.issueTitle ?? null),
       companyPrefix: run.companyPrefix ?? null,
       status: run.status,
       startedAt: run.startedAt?.toISOString() ?? new Date().toISOString(),
@@ -1413,7 +1570,8 @@ export function instanceSettingsRoutes(db: Db) {
       durationMs,
       totalTokens,
       simulatedCostCents,
-      nodes: nodes.length > 0 ? nodes : rawNodes,
+      privacyMode: privacyParam,
+      nodes: finalNodes,
     };
 
     res.json(trace);

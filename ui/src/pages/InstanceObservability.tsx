@@ -14,17 +14,20 @@ import {
   DollarSign,
   Download,
   ExternalLink,
+  Eye,
   Flame,
   GitFork,
   HardDrive,
   AlertTriangle,
   Info,
+  Lock,
   PieChart,
   Search,
   Server,
   ShieldAlert,
   Sparkles,
   TrendingUp,
+  Unlock,
   Zap,
 } from "lucide-react";
 import type {
@@ -34,6 +37,7 @@ import type {
   ModelComputeUsage,
   ComputeTimelinePoint,
   CostlyTask,
+  ObservabilityOptimizationRecommendation,
   TaskCostDetail,
 } from "@paperclipai/shared";
 import { Link } from "@/lib/router";
@@ -1064,7 +1068,8 @@ export function InstanceObservability() {
   const { setBreadcrumbs } = useBreadcrumbs();
   const [window, setWindow] = useState<WindowKey>("30d");
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>("all");
-  const [activeTab, setActiveTab] = useState<"organizations" | "agents" | "tasks">("organizations");
+  const [privacyMode, setPrivacyMode] = useState<"sanitized" | "full">("sanitized");
+  const [activeTab, setActiveTab] = useState<"organizations" | "agents" | "tasks" | "recommendations">("organizations");
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [taskSearch, setTaskSearch] = useState("");
@@ -1085,8 +1090,8 @@ export function InstanceObservability() {
   }, [setBreadcrumbs]);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["instance-observability", window, selectedCompanyId],
-    queryFn: () => instanceSettingsApi.getObservability(window, selectedCompanyId),
+    queryKey: ["instance-observability", window, selectedCompanyId, privacyMode],
+    queryFn: () => instanceSettingsApi.getObservability(window, selectedCompanyId, privacyMode),
     refetchInterval: 30_000,
   });
 
@@ -1352,6 +1357,35 @@ export function InstanceObservability() {
           <Button
             variant="outline"
             size="sm"
+            onClick={() => setPrivacyMode(privacyMode === "sanitized" ? "full" : "sanitized")}
+            className={cn(
+              "h-8 px-2.5 text-xs font-medium gap-1.5 transition-colors",
+              privacyMode === "sanitized"
+                ? "border-emerald-500/30 text-emerald-600 dark:text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/10"
+                : "border-border text-muted-foreground hover:text-foreground"
+            )}
+            title={
+              privacyMode === "sanitized"
+                ? "Modo Sanitizado Ativo: PII e payloads sensíveis mascarados em conformidade com SOC 2 e LGPD."
+                : "Modo Completo: Exibindo payloads sem redaction."
+            }
+          >
+            {privacyMode === "sanitized" ? (
+              <>
+                <Lock className="h-3.5 w-3.5 text-emerald-500" />
+                <span>Zero-PII Protegido</span>
+              </>
+            ) : (
+              <>
+                <Unlock className="h-3.5 w-3.5 text-amber-500" />
+                <span>Modo Admin Completo</span>
+              </>
+            )}
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => data && exportObservabilityCsv(data, window, selectedCompanyId, selectedCompany)}
             disabled={!data}
             className="gap-1.5"
@@ -1374,26 +1408,45 @@ export function InstanceObservability() {
       </div>
 
       {selectedCompany && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/20 bg-primary/5 px-4 py-2.5 text-sm">
-          <div className="flex items-center gap-2">
-            <Building2 className="h-4 w-4 text-primary shrink-0" />
-            <span className="text-muted-foreground">Métricas filtradas por empresa:</span>
-            <span className="font-semibold text-foreground">{selectedCompany.companyName}</span>
-            <Badge variant="outline" className="font-mono text-xs">
-              {selectedCompany.companyPrefix}
-            </Badge>
-            <span className="text-xs text-muted-foreground hidden sm:inline">
-              ({selectedCompany.activeAgentCount} agentes ativos · {selectedCompany.issueCount} tarefas · {selectedCompany.runCount} execuções)
-            </span>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-purple-500/30 bg-purple-500/5 px-4 py-3 text-sm shadow-xs">
+          <div className="flex items-center gap-2.5">
+            <div className="h-7 w-7 rounded-md bg-purple-500/10 flex items-center justify-center text-purple-500 font-bold shrink-0">
+              <Eye className="h-4 w-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-foreground">Modo Espelho do Tenant (Tenant Mirror):</span>
+                <span className="font-medium text-foreground">{selectedCompany.companyName}</span>
+                <Badge variant="outline" className="font-mono text-xs">
+                  {selectedCompany.companyPrefix}
+                </Badge>
+                {privacyMode === "sanitized" && (
+                  <Badge variant="secondary" className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs px-1.5 py-0 font-normal">
+                    🔒 Zero-PII Protegido
+                  </Badge>
+                )}
+              </div>
+              <div className="text-xs text-muted-foreground mt-0.5">
+                {selectedCompany.activeAgentCount} agentes ativos · {selectedCompany.issueCount} tarefas · {selectedCompany.runCount} execuções no período · Sessão auditada pelo protocolo de transparência.
+              </div>
+            </div>
           </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => setSelectedCompanyId("all")}
-            className="h-7 px-2.5 text-xs font-medium"
-          >
-            Ver Total Geral
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs font-medium gap-1" asChild>
+              <Link to={`/${selectedCompany.companyPrefix}/dashboard`}>
+                <span>Abrir no Workspace</span>
+                <ExternalLink className="h-3 w-3" />
+              </Link>
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setSelectedCompanyId("all")}
+              className="h-7 px-2.5 text-xs font-medium"
+            >
+              Voltar ao Total Geral
+            </Button>
+          </div>
         </div>
       )}
 
@@ -1596,7 +1649,7 @@ export function InstanceObservability() {
       <Tabs
         value={activeTab}
         onValueChange={(val) => {
-          setActiveTab(val as "organizations" | "agents" | "tasks");
+          setActiveTab(val as "organizations" | "agents" | "tasks" | "recommendations");
           setSearch("");
           setTaskSearch("");
         }}
@@ -1627,6 +1680,13 @@ export function InstanceObservability() {
                     {data?.tasks?.length ?? 0}
                   </Badge>
                 </TabsTrigger>
+                <TabsTrigger value="recommendations" className="gap-2">
+                  <Sparkles className="h-4 w-4 text-emerald-500" />
+                  <span>Recomendações FinOps</span>
+                  <Badge variant="secondary" className="text-xs px-1.5 py-0 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                    {data?.recommendations?.length ?? 0}
+                  </Badge>
+                </TabsTrigger>
               </TabsList>
 
               <div className="relative w-full sm:w-64">
@@ -1637,6 +1697,8 @@ export function InstanceObservability() {
                       ? "Search organizations…"
                       : activeTab === "agents"
                       ? "Search agents or roles…"
+                      : activeTab === "recommendations"
+                      ? "Filtrar recomendações…"
                       : "Buscar tarefa, agente, ID…"
                   }
                   value={activeTab === "tasks" ? taskSearch : search}
@@ -1809,18 +1871,18 @@ export function InstanceObservability() {
                                   title="Limpar filtro e ver total geral"
                                 >
                                   <Check className="h-3.5 w-3.5 text-primary" />
-                                  <span>Filtrada</span>
+                                  <span>Filtrada (Mirror)</span>
                                 </Button>
                               ) : (
                                 <Button
-                                  variant="outline"
+                                  variant="default"
                                   size="sm"
                                   onClick={() => setSelectedCompanyId(comp.companyId)}
-                                  className="h-8 px-2.5 text-xs gap-1"
-                                  title={`Filtrar métricas para ${comp.companyName}`}
+                                  className="h-8 px-2.5 text-xs gap-1.5"
+                                  title={`Entrar na Visão do Tenant para ${comp.companyName}`}
                                 >
-                                  <Activity className="h-3.5 w-3.5 text-muted-foreground" />
-                                  <span>Filtrar</span>
+                                  <Eye className="h-3.5 w-3.5" />
+                                  <span>Ver como Tenant</span>
                                 </Button>
                               )}
                               <Button variant="ghost" size="sm" className="h-8 px-2" asChild>
@@ -2163,6 +2225,87 @@ export function InstanceObservability() {
                 </table>
               </div>
             </TabsContent>
+
+            <TabsContent value="recommendations" className="m-0 p-5">
+              <div className="space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-border pb-3">
+                  <div>
+                    <h3 className="font-semibold text-sm text-foreground flex items-center gap-1.5">
+                      <Sparkles className="h-4 w-4 text-emerald-500" />
+                      <span>Motor de Otimização e Eficiência da Companhia</span>
+                    </h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Diagnósticos automáticos baseados nos logs de execução, custos e padrões de heartbeat de todos os tenants.
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="text-xs border-emerald-500/30 text-emerald-600 dark:text-emerald-400 self-start sm:self-auto">
+                    {data?.recommendations?.length ?? 0} Oportunidades Encontradas
+                  </Badge>
+                </div>
+
+                {!data?.recommendations || data.recommendations.length === 0 ? (
+                  <div className="p-8 text-center text-xs text-muted-foreground border border-dashed border-border rounded-lg">
+                    Nenhuma anomalia ou oportunidade de redução de custo detectada no período selecionado.
+                  </div>
+                ) : (
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {data.recommendations.map((rec) => (
+                      <Card key={rec.id} className="border-border bg-card p-4 flex flex-col justify-between shadow-xs">
+                        <div className="space-y-2.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <Badge
+                              variant="secondary"
+                              className={cn(
+                                "text-xs px-2 py-0.5 capitalize",
+                                rec.category === "prompt_caching" && "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+                                rec.category === "budget_alert" && "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+                                rec.category === "watchdog_tuning" && "bg-purple-500/10 text-purple-600 dark:text-purple-400",
+                                rec.category === "model_rightsizing" && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                              )}
+                            >
+                              {rec.category.replace("_", " ")}
+                            </Badge>
+                            {rec.estimatedMonthlySavingsCents && (
+                              <span className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                                ~{formatCents(rec.estimatedMonthlySavingsCents)}/mês
+                              </span>
+                            )}
+                          </div>
+
+                          <h4 className="font-semibold text-sm text-foreground leading-snug">{rec.title}</h4>
+                          <p className="text-xs text-muted-foreground leading-relaxed">{rec.description}</p>
+
+                          {rec.companyName && (
+                            <div className="text-xs text-muted-foreground flex items-center gap-1.5 pt-1">
+                              <Building2 className="h-3 w-3 shrink-0" />
+                              <span>{rec.companyName} ({rec.companyPrefix})</span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="mt-4 pt-3 border-t border-border flex items-center justify-between gap-2">
+                          <Badge variant="outline" className="text-xs uppercase tracking-wider font-semibold">
+                            Impacto {rec.impact}
+                          </Badge>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            className="h-7 px-2.5 text-xs font-medium"
+                            onClick={() => {
+                              if (rec.companyId) {
+                                setSelectedCompanyId(rec.companyId);
+                              }
+                            }}
+                          >
+                            <span>{rec.actionLabel}</span>
+                          </Button>
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </TabsContent>
           </CardContent>
         </Card>
       </Tabs>
@@ -2170,6 +2313,7 @@ export function InstanceObservability() {
       <AgentTraceViewer
         runId={selectedRunId}
         onClose={() => setSelectedRunId(null)}
+        privacyMode={privacyMode}
       />
     </div>
   );

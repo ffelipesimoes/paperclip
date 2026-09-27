@@ -3754,20 +3754,11 @@ describeEmbeddedPostgres("tool access service", () => {
         "sentry",
         "zapier",
         "linear",
-        "gmail",
-        "google-drive",
-        "google-docs",
-        "google-sheets",
-        "google-slides",
-        "google-calendar",
-        "google-chat",
-        "google-people",
-        "google-workspace-search",
         "github",
       ]),
     );
-    expect(res.body.apps).toHaveLength(36);
-    expect(res.body.apps.find((app: { slug: string }) => app.slug === "gmail").ownershipAvailability).toEqual({
+    expect(res.body.apps).toHaveLength(27);
+    expect(res.body.apps.find((app: { slug: string }) => app.slug === "github").ownershipAvailability).toEqual({
       platform_shared: false,
       platform_provisioned: false,
       customer: true,
@@ -3775,7 +3766,7 @@ describeEmbeddedPostgres("tool access service", () => {
     });
     const gallerySlugs = new Set(res.body.apps.map((app: { slug: string }) => app.slug));
     expect([...APP_STORE_HIDDEN_SLUGS].filter((slug) => gallerySlugs.has(slug))).toEqual([]);
-    expect(["g2", "vercel", "zomato"].filter((slug) => gallerySlugs.has(slug))).toEqual([]);
+    expect(["gmail", "google-drive", "google-sheets", "g2", "vercel", "zomato"].filter((slug) => gallerySlugs.has(slug))).toEqual([]);
     expect(res.body.apps).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -3796,40 +3787,19 @@ describeEmbeddedPostgres("tool access service", () => {
           ]),
         }),
         expect.objectContaining({
-          slug: "google-sheets",
+          slug: "github",
           methods: expect.arrayContaining([
-            expect.objectContaining({ key: "local", transport: "local_stdio" }),
+            expect.objectContaining({ key: "mcp-key", auth: "api_key" }),
           ]),
         }),
       ]),
     );
   });
 
-  it("exposes managed Google methods only for profiles signed for this enrolled instance", async () => {
+  it("withholds Google Workspace apps from the public app gallery", async () => {
     const company = await createCompany(db);
     const userId = `gallery-pilot-${randomUUID()}`;
     const pilotConnector = fakeGoogleWorkspaceConnector(company.id, userId, "gmail.read");
-    const nonPilotConnector: PaperclipCloudConnector = {
-      ...pilotConnector,
-      getCapabilities: vi.fn(async () => []),
-    };
-
-    const nonPilot = await request(createRouteApp(
-      db,
-      boardSessionActor(company.id, "owner", userId),
-      undefined,
-      { paperclipCloudConnector: nonPilotConnector },
-    )).get(`/api/companies/${company.id}/tools/gallery`);
-    expect(nonPilot.status).toBe(200);
-    const nonPilotGmail = nonPilot.body.apps.find((app: { slug: string }) => app.slug === "gmail");
-    expect(nonPilotGmail.ownershipAvailability.platform_shared).toBe(false);
-    expect(nonPilotGmail.methods.some((method: { oauthStrategy?: string }) =>
-      method.oauthStrategy === "paperclip_cloud_connector"
-    )).toBe(false);
-    expect(nonPilotGmail.methods.map((method: { key: string }) => method.key)).toEqual([
-      "customer-read-oauth",
-      "customer-draft-oauth",
-    ]);
 
     const pilot = await request(createRouteApp(
       db,
@@ -3838,13 +3808,21 @@ describeEmbeddedPostgres("tool access service", () => {
       { paperclipCloudConnector: pilotConnector },
     )).get(`/api/companies/${company.id}/tools/gallery`);
     expect(pilot.status).toBe(200);
-    const pilotGmail = pilot.body.apps.find((app: { slug: string }) => app.slug === "gmail");
-    expect(pilotGmail.ownershipAvailability.platform_shared).toBe(true);
-    expect(pilotGmail.methods.map((method: { key: string }) => method.key)).toEqual([
-      "paperclip-read",
-      "customer-read-oauth",
-      "customer-draft-oauth",
-    ]);
+    const googleSlugs = [
+      "gmail",
+      "google-drive",
+      "google-docs",
+      "google-sheets",
+      "google-slides",
+      "google-calendar",
+      "google-chat",
+      "google-people",
+      "google-workspace-search",
+    ];
+    const returnedSlugs = new Set(pilot.body.apps.map((app: { slug: string }) => app.slug));
+    for (const slug of googleSlugs) {
+      expect(returnedSlugs.has(slug)).toBe(false);
+    }
   });
 
   it("preflights only public Jira metadata without credentials or OAuth registration", async () => {

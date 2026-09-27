@@ -182,7 +182,7 @@
     {
       "slug": "gmail",
       "provider": "Gmail",
-      "catalogVisible": true,
+      "catalogVisible": false,
       "localAsset": "/brands/apps/gmail.svg",
       "officialSourceUrl": "https://fonts.gstatic.com/s/i/productlogos/gmail_2020q4/v8/192px.svg",
       "upstreamAssetUrl": "https://github.com/simple-icons/simple-icons/blob/16.28.0/icons/gmail.svg",
@@ -192,7 +192,7 @@
     {
       "slug": "google-sheets",
       "provider": "Google Sheets",
-      "catalogVisible": true,
+      "catalogVisible": false,
       "localAsset": "/brands/apps/google-sheets.svg",
       "officialSourceUrl": "https://sheets.google.com",
       "upstreamAssetUrl": "https://github.com/simple-icons/simple-icons/blob/16.28.0/icons/googlesheets.svg",
@@ -200,43 +200,43 @@
       "darkVariantRequired": false
     },
     {
-      "slug": "google-drive", "provider": "Google Drive", "catalogVisible": true,
+      "slug": "google-drive", "provider": "Google Drive", "catalogVisible": false,
       "localAsset": "/brands/apps/google-drive.svg", "officialSourceUrl": "https://drive.google.com",
       "upstreamAssetUrl": "https://github.com/simple-icons/simple-icons/blob/16.28.0/icons/googledrive.svg",
       "assetType": "svg", "darkVariantRequired": false
     },
     {
-      "slug": "google-docs", "provider": "Google Docs", "catalogVisible": true,
+      "slug": "google-docs", "provider": "Google Docs", "catalogVisible": false,
       "localAsset": "/brands/apps/google-docs.svg", "officialSourceUrl": "https://docs.google.com",
       "upstreamAssetUrl": "https://github.com/simple-icons/simple-icons/blob/16.28.0/icons/googledocs.svg",
       "assetType": "svg", "darkVariantRequired": false
     },
     {
-      "slug": "google-slides", "provider": "Google Slides", "catalogVisible": true,
+      "slug": "google-slides", "provider": "Google Slides", "catalogVisible": false,
       "localAsset": "/brands/apps/google-slides.svg", "officialSourceUrl": "https://slides.google.com",
       "upstreamAssetUrl": "https://github.com/simple-icons/simple-icons/blob/16.28.0/icons/googleslides.svg",
       "assetType": "svg", "darkVariantRequired": false
     },
     {
-      "slug": "google-calendar", "provider": "Google Calendar", "catalogVisible": true,
+      "slug": "google-calendar", "provider": "Google Calendar", "catalogVisible": false,
       "localAsset": "/brands/apps/google-calendar.svg", "officialSourceUrl": "https://calendar.google.com",
       "upstreamAssetUrl": "https://github.com/simple-icons/simple-icons/blob/16.28.0/icons/googlecalendar.svg",
       "assetType": "svg", "darkVariantRequired": false
     },
     {
-      "slug": "google-chat", "provider": "Google Chat", "catalogVisible": true,
+      "slug": "google-chat", "provider": "Google Chat", "catalogVisible": false,
       "localAsset": "/brands/apps/google-chat.svg", "officialSourceUrl": "https://chat.google.com",
       "upstreamAssetUrl": "https://github.com/simple-icons/simple-icons/blob/16.28.0/icons/googlechat.svg",
       "assetType": "svg", "darkVariantRequired": false
     },
     {
-      "slug": "google-people", "provider": "Google People", "catalogVisible": true,
+      "slug": "google-people", "provider": "Google People", "catalogVisible": false,
       "localAsset": "/brands/apps/google-people.svg", "officialSourceUrl": "https://contacts.google.com",
       "upstreamAssetUrl": "https://github.com/simple-icons/simple-icons/blob/16.28.0/icons/googlecontacts.svg",
       "assetType": "svg", "darkVariantRequired": false
     },
     {
-      "slug": "google-workspace-search", "provider": "Google Workspace Search", "catalogVisible": true,
+      "slug": "google-workspace-search", "provider": "Google Workspace Search", "catalogVisible": false,
       "localAsset": "/brands/apps/google-workspace-search.svg", "officialSourceUrl": "https://workspace.google.com",
       "upstreamAssetUrl": "https://fonts.google.com/icons?selected=Material+Symbols+Outlined:search:FILL@0;wght@400;GRAD@0;opsz@24",
       "assetType": "svg", "darkVariantRequired": false

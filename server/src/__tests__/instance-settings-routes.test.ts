@@ -1788,5 +1788,68 @@ describe("instance settings routes", () => {
       expect(res.body.nodes).toBeDefined();
       expect(res.body.nodes.length).toBeGreaterThan(0);
     });
+
+    it("sanitizes thoughts, payloads, and titles when privacy=sanitized is requested", async () => {
+      const now = new Date();
+      const mockRun = {
+        id: "run-sensitive-1",
+        agentId: "agent-1",
+        agentName: "Agent 1",
+        companyId: "comp-1",
+        companyPrefix: "COMP",
+        issueId: "issue-sensitive",
+        issueTitle: "Sensitive Customer Secret Title",
+        status: "succeeded",
+        startedAt: now,
+        finishedAt: new Date(now.getTime() + 15000),
+        error: null,
+        stdoutExcerpt: null,
+        stderrExcerpt: null,
+        usageJson: null,
+        resultJson: null,
+      };
+
+      const mockEvents = [
+        {
+          id: 1,
+          seq: 1,
+          eventType: "thought",
+          message: "Confidential customer prompt",
+          payload: { thought: "Internal bank balance: $4,200,000" },
+          createdAt: now,
+        },
+        {
+          id: 2,
+          seq: 2,
+          eventType: "tool_use",
+          message: "database_query",
+          payload: { toolName: "database_query", input: { sql: "SELECT * FROM secrets" } },
+          createdAt: now,
+        },
+      ];
+
+      let selectCallIndex = 0;
+      mockDb.select.mockImplementation(() => {
+        const calls = [[mockRun], mockEvents, []];
+        const data = calls[selectCallIndex++] ?? [];
+        return createMockSelectChain(data);
+      });
+
+      const app = await createApp(adminActor);
+      const res = await request(app).get("/api/instance/observability/runs/run-sensitive-1/trace?privacy=sanitized");
+      expect(res.status).toBe(200);
+      expect(res.body.privacyMode).toBe("sanitized");
+      expect(res.body.issueTitle).toBe("COMP-RUN [Sanitized Work Item]");
+      
+      const thoughtNode = res.body.nodes.find((n: any) => n.kind === "thought");
+      expect(thoughtNode).toBeDefined();
+      expect(thoughtNode.output).toContain("Zero-PII");
+
+      const toolNode =
+        res.body.nodes.find((n: any) => n.kind === "tool_call") ||
+        thoughtNode.children?.find((n: any) => n.kind === "tool_call");
+      expect(toolNode).toBeDefined();
+      expect(toolNode.input.status).toBe("sanitized");
+    });
   });
 });

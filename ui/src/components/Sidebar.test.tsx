@@ -623,4 +623,18 @@ describe("Sidebar", () => {
       root.unmount();
     });
   });
+
+  it("renders Approvals navigation link in primary navigation", async () => {
+    mockInstanceSettingsApi.getExperimental.mockResolvedValue({});
+    const root = await renderSidebar();
+
+    const link = [...container.querySelectorAll("nav a")].find((anchor) => anchor.textContent?.includes("Approvals"));
+    expect(link).not.toBeNull();
+    expect(link?.getAttribute("href")).toBe("/approvals");
+
+    flushSync(() => {
+      root.unmount();
+    });
+  });
 });
+

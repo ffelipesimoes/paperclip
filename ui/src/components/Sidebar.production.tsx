@@ -21,6 +21,7 @@ import {
   GanttChartSquare,
   LayoutGrid,
   Activity,
+  ShieldCheck,
 } from "lucide-react";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -177,6 +178,13 @@ export function Sidebar() {
             badgeLabel="unread"
             badgeTone={inboxBadge.failedRuns > 0 ? "danger" : "default"}
             alert={inboxBadge.failedRuns > 0}
+          />
+          <SidebarNavItem
+            to="/approvals"
+            label="Approvals"
+            icon={ShieldCheck}
+            badge={inboxBadge.approvals}
+            badgeLabel="pending"
           />
           {showDecisions ? (
             <SidebarNavItem

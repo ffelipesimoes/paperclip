@@ -33,6 +33,7 @@ import { formatCents, formatDurationMs, formatTokens } from "@/lib/utils";
 interface AgentTraceViewerProps {
   runId: string | null;
   onClose: () => void;
+  privacyMode?: "sanitized" | "full";
 }
 
 type NodeKindConfig = {
@@ -252,13 +253,13 @@ function TraceNodeItem({
   );
 }
 
-export function AgentTraceViewer({ runId, onClose }: AgentTraceViewerProps) {
+export function AgentTraceViewer({ runId, onClose, privacyMode }: AgentTraceViewerProps) {
   const [filterKind, setFilterKind] = useState<string>("all");
   const [allExpanded, setAllExpanded] = useState<boolean | undefined>(undefined);
 
   const { data: trace, isLoading, error } = useQuery({
-    queryKey: ["agent-run-trace", runId],
-    queryFn: () => instanceSettingsApi.getRunTrace(runId!),
+    queryKey: ["agent-run-trace", runId, privacyMode],
+    queryFn: () => instanceSettingsApi.getRunTrace(runId!, privacyMode),
     enabled: Boolean(runId),
   });
 
@@ -304,6 +305,11 @@ export function AgentTraceViewer({ runId, onClose }: AgentTraceViewerProps) {
                 <DialogTitle className="text-base font-semibold truncate">
                   {trace?.issueTitle ?? "Rastreio de Execução do Agente (Trace)"}
                 </DialogTitle>
+                {trace?.privacyMode === "sanitized" && (
+                  <Badge variant="outline" className="text-emerald-500 border-emerald-500/30 text-xs px-1.5 py-0 font-normal">
+                    🔒 Zero-PII Sanitizado
+                  </Badge>
+                )}
               </div>
               <DialogDescription className="text-xs text-muted-foreground truncate">
                 {trace ? (

@@ -1236,6 +1236,7 @@ export type {
   AgentRunTrace,
   TaskCostDetail,
   ComputeForecast,
+  ObservabilityOptimizationRecommendation,
   FinanceEvent,
   FinanceSummary,
   FinanceByBiller,

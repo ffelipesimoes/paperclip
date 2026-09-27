@@ -20,10 +20,16 @@ import {
   heartbeatRunEvents,
   heartbeatRuns,
   issues,
+  labels,
+  issueLabels,
   principalPermissionGrants,
   projects,
   routines,
   routineTriggers,
+  statusCards,
+  statusCardUpdates,
+  toolApplications,
+  toolConnections,
 } from "@paperclipai/db";
 import {
   getEmbeddedPostgresTestSupport,
@@ -1235,6 +1241,19 @@ describeEmbeddedPostgres("companyService", () => {
       })
       .returning();
 
+    // Insert a sub-agent reporting to agent
+    const [subAgent] = await db
+      .insert(agents)
+      .values({
+        companyId: company.id,
+        name: "Sub Worker",
+        role: "general",
+        adapterType: "codex_local",
+        status: "idle",
+        reportsTo: agent.id,
+      })
+      .returning();
+
     // Insert parent and child goals
     const [parentGoal] = await db
       .insert(goals)
@@ -1265,7 +1284,7 @@ describeEmbeddedPostgres("companyService", () => {
       })
       .returning();
 
-    // Insert parent and child issues
+    // Insert parent and child issues (with createdByAgentId and assigneeAgentId)
     const [parentIssue] = await db
       .insert(issues)
       .values({
@@ -1275,7 +1294,8 @@ describeEmbeddedPostgres("companyService", () => {
         status: "open",
         projectId: proj.id,
         goalId: childGoal.id,
-        assigneeAgentId: agent.id,
+        assigneeAgentId: subAgent.id,
+        createdByAgentId: agent.id,
       })
       .returning();
 
@@ -1288,7 +1308,102 @@ describeEmbeddedPostgres("companyService", () => {
         status: "open",
         parentId: parentIssue.id,
         projectId: proj.id,
+        createdByAgentId: subAgent.id,
       });
+
+    // Insert labels and issue labels
+    const [label] = await db
+      .insert(labels)
+      .values({
+        companyId: company.id,
+        name: "bug",
+        color: "#ff0000",
+      })
+      .returning();
+
+    await db.insert(issueLabels).values({
+      companyId: company.id,
+      issueId: parentIssue.id,
+      labelId: label.id,
+    });
+
+    // Insert company skills referencing the issue
+    const skillId = randomUUID();
+    const versionId = randomUUID();
+    await db.insert(companySkills).values({
+      id: skillId,
+      companyId: company.id,
+      key: "custom-skill",
+      name: "custom-skill",
+      slug: "custom-skill",
+      markdown: "# Custom Skill",
+      currentVersionId: null,
+    });
+    await db.insert(companySkillVersions).values({
+      id: versionId,
+      companyId: company.id,
+      companySkillId: skillId,
+      revisionNumber: 1,
+      authorAgentId: agent.id,
+      fileInventory: [],
+    });
+    await db.update(companySkills).set({ currentVersionId: versionId }).where(eq(companySkills.id, skillId));
+
+    // Insert heartbeat run and events
+    const runId = randomUUID();
+    await db.insert(heartbeatRuns).values({
+      id: runId,
+      companyId: company.id,
+      agentId: agent.id,
+      invocationSource: "timer",
+      status: "succeeded",
+    });
+    await db.insert(heartbeatRunEvents).values({
+      companyId: company.id,
+      runId,
+      agentId: agent.id,
+      seq: 1,
+      eventType: "turn_completed",
+      payload: {},
+    });
+
+    // Insert status cards and card updates
+    const cardId = randomUUID();
+    await db.insert(statusCards).values({
+      id: cardId,
+      companyId: company.id,
+      title: "Task Summary",
+      interestPrompt: "Track task progress",
+      refreshPolicy: { mode: "manual" },
+      generatingIssueId: parentIssue.id,
+      agentId: agent.id,
+    });
+    await db.insert(statusCardUpdates).values({
+      cardId,
+      generationIssueId: parentIssue.id,
+      runId,
+      kind: "update",
+      trigger: "run_finished",
+      status: "completed",
+    });
+
+    // Insert tool application and connection
+    const appId = randomUUID();
+    await db.insert(toolApplications).values({
+      id: appId,
+      companyId: company.id,
+      name: "Internal App",
+      type: "custom",
+    });
+    await db.insert(toolConnections).values({
+      companyId: company.id,
+      applicationId: appId,
+      name: "Primary Connection",
+      uid: "primary-conn",
+      transport: "mcp_remote",
+      authKind: "none",
+      status: "ready",
+    });
 
     // Insert a budget policy
     await db.insert(budgetPolicies).values({
@@ -1320,5 +1435,17 @@ describeEmbeddedPostgres("companyService", () => {
     // Verify issues are gone
     const remainingIssues = await db.select().from(issues).where(eq(issues.companyId, company.id));
     expect(remainingIssues).toHaveLength(0);
+
+    // Verify agents are gone
+    const remainingAgents = await db.select().from(agents).where(eq(agents.companyId, company.id));
+    expect(remainingAgents).toHaveLength(0);
+
+    // Verify skills are gone
+    const remainingSkills = await db.select().from(companySkills).where(eq(companySkills.companyId, company.id));
+    expect(remainingSkills).toHaveLength(0);
+
+    // Verify tools are gone
+    const remainingConnections = await db.select().from(toolConnections).where(eq(toolConnections.companyId, company.id));
+    expect(remainingConnections).toHaveLength(0);
   });
 });
