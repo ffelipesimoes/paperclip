@@ -559,7 +559,7 @@ function ComputeForecastCard({
               <CardTitle className="text-base">Previsão & FinOps Runway (Token & Cost Forecast)</CardTitle>
             </div>
             <CardDescription>
-              Projeção de encerramento do ciclo mensal (UTC) estimada pelo ritmo de consumo recente (burn rate).
+              Estimativa de encerramento do ciclo mensal (UTC) pelo ritmo de consumo esperado (burn rate).
             </CardDescription>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -591,7 +591,7 @@ function ComputeForecastCard({
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-1">
             <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>Tokens Projetados (Mês)</span>
+              <span>Tokens Esperados (Mês)</span>
               <Coins className="h-3.5 w-3.5 text-sky-500" />
             </div>
             <div className="font-mono text-lg font-bold text-foreground">
@@ -609,7 +609,7 @@ function ComputeForecastCard({
 
           <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-1">
             <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>Custo Projetado (Mês)</span>
+              <span>Custo Esperado (Mês)</span>
               <Flame className="h-3.5 w-3.5 text-amber-500" />
             </div>
             <div className="font-mono text-lg font-bold text-amber-500">
@@ -619,7 +619,7 @@ function ComputeForecastCard({
               MTD atual: <span className="font-mono text-foreground font-medium">{formatCents(forecast.currentMtdCostCents)}</span>
               {forecast.daysRemainingInMonth > 0 && (
                 <span className="block text-(length:--text-micro) text-muted-foreground">
-                  +{formatCents(forecast.dailyBurnCostCents * forecast.daysRemainingInMonth)} projetados
+                  +{formatCents(forecast.dailyBurnCostCents * forecast.daysRemainingInMonth)} esperados
                 </span>
               )}
             </div>
@@ -676,7 +676,7 @@ function ComputeForecastCard({
                 Utilização do Orçamento {forecast.scopeType === "company" && forecast.scopeName ? `(${forecast.scopeName})` : "Consolidado"}
               </span>
               <span className="font-mono font-medium text-foreground">
-                Consumido: {mtdSpentPercent}% · Projeção: {forecast.projectedBudgetUtilizationPercent ?? 0}%
+                Consumido: {mtdSpentPercent}% · Esperado: {forecast.projectedBudgetUtilizationPercent ?? 0}%
               </span>
             </div>
             <div className="h-2 w-full rounded-full bg-muted overflow-hidden flex">
@@ -910,11 +910,11 @@ function ComputeTimelineCard({
                   <div
                     key="forecast-projection"
                     className="group relative flex-1 max-w-24 flex flex-col items-center justify-end h-full"
-                    title={`Ritmo Projetado: ${metric === "cost" ? formatCents(forecast.dailyBurnCostCents) : formatTokens(forecast.dailyBurnTokens)}/dia`}
+                    title={`Ritmo Esperado: ${metric === "cost" ? formatCents(forecast.dailyBurnCostCents) : formatTokens(forecast.dailyBurnTokens)}/dia`}
                   >
                     <div className="mb-1.5 flex flex-col items-center">
                       <span className="text-(length:--text-micro) font-semibold uppercase tracking-wider text-primary">
-                        Projeção
+                        Esperado
                       </span>
                       <span className="font-mono text-xs font-semibold text-primary whitespace-nowrap">
                         {metric === "cost" ? formatCents(forecast.dailyBurnCostCents) : formatTokens(forecast.dailyBurnTokens)}
@@ -929,7 +929,7 @@ function ComputeTimelineCard({
                     />
 
                     <span className="mt-2 text-xs font-mono text-primary font-medium">
-                      +1d méd.
+                      esperado
                     </span>
                   </div>
                 )}
