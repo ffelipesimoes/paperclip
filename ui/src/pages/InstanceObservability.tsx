@@ -157,6 +157,7 @@ function exportObservabilityCsv(
       "Output Tokens",
       "Billed Cost ($)",
       "Simulated Cost ($)",
+      "Budget ($)",
     ]
       .map(escape)
       .join(","),
@@ -181,6 +182,7 @@ function exportObservabilityCsv(
         c.outputTokens,
         (c.costCents / 100).toFixed(2),
         (c.simulatedCostCents / 100).toFixed(2),
+        c.budgetMonthlyCents ? (c.budgetMonthlyCents / 100).toFixed(2) : "N/A",
       ]
         .map(escape)
         .join(","),
@@ -209,6 +211,7 @@ function exportObservabilityCsv(
       "Tokens/sec",
       "Billed Cost ($)",
       "Simulated Cost ($)",
+      "Budget ($)",
     ]
       .map(escape)
       .join(","),
@@ -234,6 +237,7 @@ function exportObservabilityCsv(
         a.tokensPerSecond,
         (a.costCents / 100).toFixed(2),
         (a.simulatedCostCents / 100).toFixed(2),
+        a.budgetMonthlyCents ? (a.budgetMonthlyCents / 100).toFixed(2) : "N/A",
       ]
         .map(escape)
         .join(","),
@@ -574,7 +578,9 @@ function ComputeForecastCard({
               </Badge>
             ) : (
               <Badge variant="secondary" className="bg-muted text-muted-foreground text-xs">
-                Sem teto orçamentário configurado
+                {forecast.entitiesWithBudgetCount && forecast.entitiesWithBudgetCount > 0
+                  ? `Tetos individuais (${forecast.entitiesWithBudgetCount} configurado${forecast.entitiesWithBudgetCount > 1 ? "s" : ""})`
+                  : "Sem teto global configurado"}
               </Badge>
             )}
           </div>
@@ -635,11 +641,11 @@ function ComputeForecastCard({
 
           <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-1">
             <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>Teto & Runway</span>
+              <span>{forecast.scopeType === "company" && forecast.scopeName ? `Teto (${forecast.scopeName})` : "Teto & Runway"}</span>
               <DollarSign className="h-3.5 w-3.5 text-emerald-500" />
             </div>
             <div className="font-mono text-lg font-bold text-foreground">
-              {hasBudget && forecast.budgetMonthlyCents ? formatCents(forecast.budgetMonthlyCents) : "Sem Teto"}
+              {hasBudget && forecast.budgetMonthlyCents ? formatCents(forecast.budgetMonthlyCents) : "Sem Teto Global"}
             </div>
             <div className="text-xs text-muted-foreground">
               {isExceeding ? (
@@ -653,7 +659,11 @@ function ComputeForecastCard({
                   Margem: {forecast.projectedBudgetUtilizationPercent != null ? `${(100 - forecast.projectedBudgetUtilizationPercent).toFixed(1)}% livre` : "Segura"}
                 </span>
               ) : (
-                <span>Sem limite mensal definido</span>
+                <span>
+                  {forecast.entitiesWithBudgetCount && forecast.entitiesWithBudgetCount > 0
+                    ? `${forecast.entitiesWithBudgetCount} tenant(s) com limites locais`
+                    : "Sem limite mensal unificado"}
+                </span>
               )}
             </div>
           </div>
@@ -662,7 +672,9 @@ function ComputeForecastCard({
         {hasBudget && forecast.budgetMonthlyCents && (
           <div className="rounded-lg border border-border bg-muted/10 p-3 space-y-2">
             <div className="flex items-center justify-between text-xs">
-              <span className="text-muted-foreground">Utilização do Orçamento Mensal</span>
+              <span className="text-muted-foreground">
+                Utilização do Orçamento {forecast.scopeType === "company" && forecast.scopeName ? `(${forecast.scopeName})` : "Consolidado"}
+              </span>
               <span className="font-mono font-medium text-foreground">
                 Consumido: {mtdSpentPercent}% · Projeção: {forecast.projectedBudgetUtilizationPercent ?? 0}%
               </span>
@@ -1782,13 +1794,14 @@ export function InstanceObservability() {
                           <ArrowUpDown className="h-3 w-3" />
                         </button>
                       </th>
+                      <th className="px-5 py-3 font-medium">Teto Orçamentário</th>
                       <th className="px-5 py-3 text-right font-medium">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredAndSortedCompanies.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="px-5 py-8 text-center text-sm text-muted-foreground">
+                        <td colSpan={9} className="px-5 py-8 text-center text-sm text-muted-foreground">
                           No organizations found matching the criteria.
                         </td>
                       </tr>
@@ -1858,6 +1871,21 @@ export function InstanceObservability() {
                           <td className="px-5 py-3.5 align-top">
                             <div className="font-mono text-sm font-medium text-amber-500">{formatCents(comp.simulatedCostCents)}</div>
                             <div className="text-xs text-muted-foreground">simulated value</div>
+                          </td>
+
+                          <td className="px-5 py-3.5 align-top">
+                            {comp.budgetMonthlyCents ? (
+                              <div>
+                                <div className="font-mono text-sm font-medium text-foreground">
+                                  {formatCents(comp.budgetMonthlyCents)}
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                  {Math.round((comp.simulatedCostCents / comp.budgetMonthlyCents) * 100)}% consumido
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="text-xs text-muted-foreground font-mono">Sem limite</div>
+                            )}
                           </td>
 
                           <td className="px-5 py-3.5 text-right align-top">
@@ -1967,13 +1995,14 @@ export function InstanceObservability() {
                           <ArrowUpDown className="h-3 w-3" />
                         </button>
                       </th>
+                      <th className="px-5 py-3 font-medium">Teto Orçamentário</th>
                       <th className="px-5 py-3 text-right font-medium">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredAndSortedAgents.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="px-5 py-8 text-center text-sm text-muted-foreground">
+                        <td colSpan={9} className="px-5 py-8 text-center text-sm text-muted-foreground">
                           No agents found matching the criteria.
                         </td>
                       </tr>
@@ -2037,6 +2066,21 @@ export function InstanceObservability() {
                             <div className="text-xs text-muted-foreground">
                               {agent.costCents > 0 ? `billed: ${formatCents(agent.costCents)}` : "subscription ($0 billed)"}
                             </div>
+                          </td>
+
+                          <td className="px-5 py-3.5 align-top">
+                            {agent.budgetMonthlyCents ? (
+                              <div>
+                                <div className="font-mono text-sm font-medium text-foreground">
+                                  {formatCents(agent.budgetMonthlyCents)}
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                  {Math.round((agent.simulatedCostCents / agent.budgetMonthlyCents) * 100)}% consumido
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="text-xs text-muted-foreground font-mono">Sem limite</div>
+                            )}
                           </td>
 
                           <td className="px-5 py-3.5 text-right align-top">

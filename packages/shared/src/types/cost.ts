@@ -170,6 +170,7 @@ export interface CompanyComputeUsage {
   simulatedCostCents: number;
   subscriptionTokens: number;
   subscriptionRunCount: number;
+  budgetMonthlyCents?: number | null;
 }
 
 export interface HostComputeResources {
@@ -305,6 +306,7 @@ export interface AgentComputeUsage {
   simulatedCostCents: number;
   avgDurationMs: number;
   tokensPerSecond: number;
+  budgetMonthlyCents?: number | null;
 }
 
 export interface InstanceObservabilitySummary {
@@ -370,4 +372,7 @@ export interface ComputeForecast {
   daysUntilBudgetExhausted?: number | null;
   currentMtdTokens: number;
   currentMtdCostCents: number;
+  scopeType?: "instance" | "company" | "none";
+  scopeName?: string | null;
+  entitiesWithBudgetCount?: number;
 }

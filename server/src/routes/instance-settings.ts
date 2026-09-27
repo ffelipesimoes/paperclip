@@ -556,6 +556,7 @@ export function instanceSettingsRoutes(db: Db) {
           name: agents.name,
           role: agents.role,
           status: agents.status,
+          budgetMonthlyCents: agents.budgetMonthlyCents,
           companyId: agents.companyId,
           companyName: companies.name,
           companyPrefix: companies.issuePrefix,
@@ -678,6 +679,7 @@ export function instanceSettingsRoutes(db: Db) {
         simulatedCostCents: 0,
         subscriptionTokens: 0,
         subscriptionRunCount: 0,
+        budgetMonthlyCents: Number(c.budgetMonthlyCents ?? 0) > 0 ? Number(c.budgetMonthlyCents) : null,
       });
     }
 
@@ -793,6 +795,7 @@ export function instanceSettingsRoutes(db: Db) {
         simulatedCostCents: 0,
         avgDurationMs: 0,
         tokensPerSecond: 0,
+        budgetMonthlyCents: Number(a.budgetMonthlyCents ?? 0) > 0 ? Number(a.budgetMonthlyCents) : null,
       });
     }
 
@@ -1094,11 +1097,32 @@ export function instanceSettingsRoutes(db: Db) {
 
     // Budget evaluation
     let targetBudgetCents = 0;
+    let scopeType: "instance" | "company" | "none" = "none";
+    let scopeName: string | null = null;
+    const companiesWithBudget = allCompanies.filter((c) => Number(c.budgetMonthlyCents ?? 0) > 0);
+    const entitiesWithBudgetCount = companiesWithBudget.length;
+
     if (companyIdParam) {
       const targetCompanyRecord = allCompanies.find((c) => c.id === companyIdParam);
       targetBudgetCents = Number(targetCompanyRecord?.budgetMonthlyCents ?? 0);
+      if (targetBudgetCents > 0) {
+        scopeType = "company";
+        scopeName = targetCompanyRecord?.name ?? "Organização";
+      }
     } else {
-      targetBudgetCents = allCompanies.reduce((acc, c) => acc + Number(c.budgetMonthlyCents ?? 0), 0);
+      // In global / instance view:
+      // We only evaluate a global budget if ALL companies have a budget, or if an instance-wide limit is defined.
+      // If some companies have NO budget (0 / unlimited), summing partial budgets ($50) against the TOTAL instance spend ($442)
+      // causes a false "exceeding budget" alert.
+      const allHaveBudget = allCompanies.length > 0 && allCompanies.every((c) => Number(c.budgetMonthlyCents ?? 0) > 0);
+      if (allHaveBudget) {
+        targetBudgetCents = allCompanies.reduce((acc, c) => acc + Number(c.budgetMonthlyCents ?? 0), 0);
+        scopeType = "instance";
+        scopeName = "Todas as Organizações";
+      } else {
+        targetBudgetCents = 0;
+        scopeType = "none";
+      }
     }
 
     let budgetStatus: "within_budget" | "exceeding_budget" | "no_budget" = "no_budget";
@@ -1132,6 +1156,9 @@ export function instanceSettingsRoutes(db: Db) {
       daysUntilBudgetExhausted,
       currentMtdTokens,
       currentMtdCostCents,
+      scopeType,
+      scopeName,
+      entitiesWithBudgetCount,
     };
 
     const privacyParam =
@@ -1179,17 +1206,69 @@ export function instanceSettingsRoutes(db: Db) {
       }
     }
 
-    // 2. Budget Alert
-    if (forecast.budgetStatus === "exceeding_budget" || (forecast.projectedBudgetUtilizationPercent ?? 0) >= 80) {
-      recommendations.push({
-        id: "rec-budget-alert",
-        category: "budget_alert",
-        title: companyIdParam ? "Alerta de Consumo Crítico de Orçamento" : "Tenants Próximos ao Limite Mensal",
-        description: `Projeção de atingir ${forecast.projectedBudgetUtilizationPercent ?? 100}% do teto mensal antes do fim do período. Avalie expansão de quota ou política de hard-stop.`,
-        impact: "high",
-        actionKey: "review_budget",
-        actionLabel: "Revisar Limites de Quota",
-      });
+    // 2. Budget Alert (Scope & Entity Specific)
+    if (companyIdParam && targetBudgetCents > 0) {
+      if (forecast.budgetStatus === "exceeding_budget" || (forecast.projectedBudgetUtilizationPercent ?? 0) >= 80) {
+        recommendations.push({
+          id: `rec-budget-alert-${companyIdParam}`,
+          category: "budget_alert",
+          title: `Alerta de Quota: Organização ${scopeName ?? ""}`,
+          description: `Projeção de atingir ${forecast.projectedBudgetUtilizationPercent ?? 100}% do teto mensal antes do fim do período. Avalie expansão de quota ou política de hard-stop.`,
+          companyId: companyIdParam,
+          companyName: scopeName,
+          impact: "high",
+          actionKey: "review_budget",
+          actionLabel: "Revisar Limites de Quota",
+        });
+      }
+    } else {
+      // Check each company with an individual budget
+      for (const comp of allCompanies) {
+        const compBudgetCents = Number(comp.budgetMonthlyCents ?? 0);
+        if (compBudgetCents > 0) {
+          const compUsage = companyMap.get(comp.id);
+          const compSpent = compUsage?.simulatedCostCents ?? 0;
+          const compPercent = Math.round((compSpent / compBudgetCents) * 100);
+          if (compPercent >= 80) {
+            recommendations.push({
+              id: `rec-budget-comp-${comp.id}`,
+              category: "budget_alert",
+              title: `Teto Crítico: Organização ${comp.name}`,
+              description: `A organização ${comp.name} atingiu ${compPercent}% do seu orçamento mensal ($${(compSpent / 100).toFixed(2)} de $${(compBudgetCents / 100).toFixed(2)}).`,
+              companyId: comp.id,
+              companyName: comp.name,
+              companyPrefix: comp.issuePrefix,
+              impact: "high",
+              actionKey: "review_budget",
+              actionLabel: "Revisar Teto do Tenant",
+            });
+          }
+        }
+      }
+
+      // Check each agent with an individual budget
+      for (const ag of agentList) {
+        if (ag.budgetMonthlyCents && ag.budgetMonthlyCents > 0) {
+          const agSpent = ag.simulatedCostCents;
+          const agPercent = Math.round((agSpent / ag.budgetMonthlyCents) * 100);
+          if (agPercent >= 80) {
+            recommendations.push({
+              id: `rec-budget-agent-${ag.agentId}`,
+              category: "budget_alert",
+              title: `Teto Crítico: Agente ${ag.agentName}`,
+              description: `O agente ${ag.agentName} (${ag.companyName}) consumiu ${agPercent}% do seu budget mensal ($${(agSpent / 100).toFixed(2)} de $${(ag.budgetMonthlyCents / 100).toFixed(2)}).`,
+              companyId: ag.companyId,
+              companyName: ag.companyName,
+              companyPrefix: ag.companyPrefix,
+              agentId: ag.agentId,
+              agentName: ag.agentName,
+              impact: "high",
+              actionKey: "review_agent_budget",
+              actionLabel: "Revisar Teto do Agente",
+            });
+          }
+        }
+      }
     }
 
     // 3. Watchdog Tuning
