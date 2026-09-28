@@ -27,9 +27,9 @@ const DEFAULT_TOUR_STEPS: TourStep[] = [
   },
   {
     targetSelector: '[data-tour="activity"]',
-    title: "Linha do Tempo & Auditoria",
+    title: "Auditoria & Trava Financeira",
     description:
-      "Acompanhe o raciocínio, ferramentas e execuções dos seus agentes em tempo real, com transparência total de histórico e custos.",
+      "Acompanhe o raciocínio dos agentes e os custos da sua chave em tempo real. Se o teto configurado for alcançado, o Paperclip pausa o agente automaticamente.",
     placement: "right",
   },
   {

@@ -60,7 +60,9 @@ import { issuesApi } from "../api/issues";
 import { projectsApi } from "../api/projects";
 import { environmentsApi } from "../api/environments";
 import { instanceSettingsApi } from "../api/instanceSettings";
+import { budgetsApi } from "../api/budgets";
 import { teamCatalogApi } from "../api/teamCatalog";
+import { OpenCodeLogoIcon } from "@/components/OpenCodeLogoIcon";
 import {
   resolveAdapterTestEnvironmentId,
   resolveLocalDefaultEnvironmentId,
@@ -258,6 +260,7 @@ function OpenAiBlossom({ className }: { className?: string }) {
 
 const MODEL_SOURCE_INLINE_MARKS: Record<string, ComponentType<{ className?: string }>> = {
   codex_local: OpenAiBlossom,
+  opencode_local: OpenCodeLogoIcon,
 };
 
 /**
@@ -271,6 +274,7 @@ const MODEL_SOURCE_INLINE_MARKS: Record<string, ComponentType<{ className?: stri
 const API_KEY_ENV_KEYS: Record<string, string> = {
   claude_local: ANTHROPIC_API_KEY_ENV_KEY,
   codex_local: "OPENAI_API_KEY",
+  opencode_local: "OPENROUTER_API_KEY",
 };
 
 function apiKeyEnvKeyFor(adapterType: string): string {
@@ -745,6 +749,7 @@ function OnboardingWizardInner({
   const [selectedSquadTemplate, setSelectedSquadTemplate] = useState<string>(
     (saved?.selectedSquadTemplate as string) ?? "product-engineering"
   );
+  const [budgetMonthlyDollars, setBudgetMonthlyDollars] = useState<number>(10);
 
   // The company the *route* last supplied, so a navigation that stops naming
   // one can drop it without touching a company the wizard created itself.
@@ -1714,6 +1719,22 @@ function OnboardingWizardInner({
       // another company in the meantime: it would take them back, and `reset()`
       // would discard the progress they had started there.
       if (!stillTheSameCompany(createdCompanyId)) return;
+
+      if (budgetMonthlyDollars > 0) {
+        try {
+          await budgetsApi.upsertPolicy(createdCompanyId, {
+            scopeType: "company",
+            scopeId: createdCompanyId,
+            amount: Math.round(budgetMonthlyDollars * 100),
+            windowKind: "calendar_month_utc",
+            warnPercent: 80,
+            hardStopEnabled: true,
+            notifyEnabled: true,
+          });
+        } catch (budgetErr) {
+          console.warn("Failed to set initial budget policy:", budgetErr);
+        }
+      }
 
       const prefix = createdCompanyPrefix;
       // Define o gatilho para iniciar o tour interativo no primeiro acesso
@@ -3092,7 +3113,7 @@ function OnboardingWizardInner({
                         if (connectPhase !== "idle") return;
                         setSourcePicked(true);
                         setAdapterType(id);
-                        if (id === "opencode_local") setModel(DEFAULT_OPENCODE_LOCAL_MODEL);
+                        if (id === "opencode_local") setModel("openrouter/deepseek/deepseek-chat");
                         else if (id !== "codex_local") setModel("");
                         setConnectPhase("collapsing");
                       }}
@@ -3169,8 +3190,16 @@ function OnboardingWizardInner({
                         } API key to connect`}
                       >
                         <OnboardingCardField
-                          label="API key"
-                          placeholder="Enter API key here"
+                          label={`${
+                            CONNECT_SOURCE_NAMES[adapterType] ?? "API"
+                          } key`}
+                          placeholder={
+                            adapterType === "opencode_local"
+                              ? "sk-or-v1-..."
+                              : adapterType === "codex_local"
+                              ? "sk-proj-..."
+                              : "sk-ant-..."
+                          }
                           masked
                           // The card is the answer to the tile just pressed, so
                           // the field is unambiguously the next thing. Carried
@@ -3421,10 +3450,55 @@ function OnboardingWizardInner({
                   </div>
                 </div>
               )}
-              {/* Step 5: nothing. The heading names the agent and says it is
-                  ready, and the pill above has just woken to show it — a
-                  checklist restating those in three rows only asked the
-                  customer to audit work they watched happen. */}
+              {/* Step 5: Budget Hard-Stop configuration */}
+              {step === 5 && (
+                <div className="rounded-lg border border-border/70 bg-card p-4 space-y-3 animate-in fade-in duration-300">
+                  <div className="flex items-center justify-between border-b border-border/50 pb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-foreground">
+                        Trava de Segurança Financeira (Budget Hard Stop)
+                      </span>
+                      <span className="rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/20 px-2 py-0.5 text-(length:--text-nano) font-medium">
+                        Auto-pause ativo
+                      </span>
+                    </div>
+                    <span className="text-(length:--text-micro) font-mono text-emerald-500">
+                      ${budgetMonthlyDollars}.00 / mês
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Seus agentes serão pausados automaticamente no banco de dados se atingirem este teto mensal de gastos da API.
+                  </p>
+                  <div className="flex items-center gap-2 pt-1">
+                    {[10, 25, 50].map((amount) => (
+                      <button
+                        key={amount}
+                        type="button"
+                        onClick={() => setBudgetMonthlyDollars(amount)}
+                        className={cn(
+                          "cursor-pointer rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
+                          budgetMonthlyDollars === amount
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border bg-muted/30 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                        )}
+                      >
+                        ${amount}.00 / mês
+                      </button>
+                    ))}
+                    <div className="flex items-center gap-1.5 ml-auto">
+                      <span className="text-xs text-muted-foreground">$</span>
+                      <Input
+                        type="number"
+                        min={5}
+                        max={1000}
+                        value={budgetMonthlyDollars}
+                        onChange={(e) => setBudgetMonthlyDollars(Math.max(1, Number(e.target.value) || 10))}
+                        className="h-8 w-20 text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Error */}
               {visibleError && (

@@ -47,8 +47,9 @@ export type AdapterLoginChrome = "panel" | "onboarding";
  * otherwise, this is the one to delete.
  */
 export const CONNECT_SOURCE_NAMES: Record<string, string> = {
-  claude_local: "Claude",
+  claude_local: "Anthropic",
   codex_local: "OpenAI",
+  opencode_local: "OpenRouter",
 };
 
 /** The provider name for a source, falling back to the type when unlisted. */
