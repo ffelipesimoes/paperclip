@@ -152,6 +152,9 @@ ENV NODE_ENV=production \
 
 EXPOSE 3100
 
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=5 \
+  CMD curl -f http://127.0.0.1:3100/api/health || exit 1
+
 # tini, not node, is PID 1. The entrypoint ends in `exec`, so without an init
 # node inherits PID 1 and never wait()s the orphans the kernel re-parents onto
 # it -- agent runs spawn git/claude/esbuild/sh descendants that outlive their
