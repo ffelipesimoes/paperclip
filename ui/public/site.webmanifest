@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "Paperclip",
-  "short_name": "Paperclip",
-  "description": "AI-powered project management and agent coordination platform",
+  "name": "W3DU Control Plane",
+  "short_name": "W3DU",
+  "description": "Autonomous AI workforce and agent coordination control plane",
   "start_url": "/",
   "scope": "/",
   "display": "browser",

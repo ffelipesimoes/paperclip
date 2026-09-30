@@ -1279,6 +1279,29 @@
   animation: paperclip-thinking-draw 1s linear infinite;
 }
 
+.w3du-loader-blue {
+  color: #357291;
+  animation: w3du-pulse 2s ease-in-out infinite;
+}
+
+.w3du-loader-orange {
+  color: #eb5224;
+  animation: w3du-pulse 2s ease-in-out 0.4s infinite;
+}
+
+@keyframes w3du-pulse {
+  0%, 100% {
+    opacity: 0.65;
+    transform: scale(1);
+    transform-origin: center;
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+    transform-origin: center;
+  }
+}
+
 /* Muted variant (task-chat v7 activity rows): the sweep runs over the
    muted-foreground tier so live "Thinking…"/"Working…" labels stay subordinate
    to real content. */
