@@ -54,6 +54,9 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-w3du-orange: var(--w3du-orange);
+  --color-w3du-orange-hover: var(--w3du-orange-hover);
+  --color-w3du-blue: var(--w3du-blue);
   /* Multiplicative radius ladder (modern shadcn/Tailwind v4 mapping):
      sm/md/lg/xl/2xl/3xl/4xl = 0.6/0.8/1.0/1.4/1.8/2.2/2.6 x the single
      --radius knob (base anchor 0.5rem = 8px; rounded-lg IS the anchor).
@@ -110,6 +113,9 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+  --w3du-orange: #eb5224;
+  --w3du-orange-hover: #d84215;
+  --w3du-blue: #357291;
   --chip-match-title-bg: oklch(0.97 0.02 265);
   --chip-match-title-fg: oklch(0.4 0.13 265);
   --chip-match-title-border: oklch(0.85 0.05 265);
@@ -391,6 +397,9 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+  --w3du-orange: #eb5224;
+  --w3du-orange-hover: #d84215;
+  --w3du-blue: #357291;
   --chip-match-title-bg: oklch(0.27 0.04 265 / 0.5);
   --chip-match-title-fg: oklch(0.78 0.10 265);
   --chip-match-title-border: oklch(0.4 0.06 265);

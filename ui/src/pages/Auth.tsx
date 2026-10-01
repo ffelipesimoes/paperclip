@@ -86,23 +86,23 @@ export function AuthPage() {
         <ThemeToggle />
       </div>
       {/* Left half — form */}
-      <div className="w-full md:w-1/2 flex flex-col overflow-y-auto">
-        <div className="w-full max-w-md mx-auto my-auto px-8 py-12">
-          <div className="mb-8">
-            <PaperclipLockup className="h-8 w-auto" />
+      <div className="w-full md:w-1/2 flex flex-col justify-center items-center overflow-y-auto px-4 py-12">
+        <div className="w-full max-w-sm rounded-2xl border border-border bg-card/60 p-8 shadow-xs backdrop-blur-xs text-center">
+          <div className="flex justify-center mb-6">
+            <PaperclipLockup className="h-8 w-auto object-contain" />
           </div>
 
-          <h1 className="text-xl font-semibold">
+          <h1 className="text-xl font-semibold tracking-tight text-foreground">
             {mode === "sign_in" ? "Sign in to W3DU" : "Create your W3DU account"}
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <p className="mt-1 text-xs text-muted-foreground">
             {mode === "sign_in"
               ? "Use your email and password to access this instance."
               : "Create an account for this instance. Email confirmation is not required in v1."}
           </p>
 
           <form
-            className="mt-6 space-y-4"
+            className="mt-6 space-y-4 text-left"
             method="post"
             action={mode === "sign_up" ? "/api/auth/sign-up/email" : "/api/auth/sign-in/email"}
             onSubmit={(event) => {
@@ -117,11 +117,11 @@ export function AuthPage() {
           >
             {mode === "sign_up" && (
               <div>
-                <label htmlFor="name" className="text-xs text-muted-foreground mb-1 block">Name</label>
+                <label htmlFor="name" className="text-xs font-medium text-foreground mb-1.5 block">Name</label>
                 <input
                   id="name"
                   name="name"
-                  className="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/50"
+                  className="w-full rounded-lg border border-input bg-background/50 px-3.5 py-2.5 text-sm text-foreground outline-none transition-colors focus:border-w3du-orange focus:ring-1 focus:ring-w3du-orange placeholder:text-muted-foreground/50"
                   value={name}
                   onChange={(event) => setName(event.target.value)}
                   autoComplete="name"
@@ -134,11 +134,11 @@ export function AuthPage() {
               </div>
             )}
             <div>
-              <label htmlFor="email" className="text-xs text-muted-foreground mb-1 block">Email</label>
+              <label htmlFor="email" className="text-xs font-medium text-foreground mb-1.5 block">Email</label>
               <input
                 id="email"
                 name="email"
-                className="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/50"
+                className="w-full rounded-lg border border-input bg-background/50 px-3.5 py-2.5 text-sm text-foreground outline-none transition-colors focus:border-w3du-orange focus:ring-1 focus:ring-w3du-orange placeholder:text-muted-foreground/50"
                 type="email"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
@@ -151,11 +151,11 @@ export function AuthPage() {
               />
             </div>
             <div>
-              <label htmlFor="password" className="text-xs text-muted-foreground mb-1 block">Password</label>
+              <label htmlFor="password" className="text-xs font-medium text-foreground mb-1.5 block">Password</label>
               <input
                 id="password"
                 name="password"
-                className="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/50"
+                className="w-full rounded-lg border border-input bg-background/50 px-3.5 py-2.5 text-sm text-foreground outline-none transition-colors focus:border-w3du-orange focus:ring-1 focus:ring-w3du-orange placeholder:text-muted-foreground/50"
                 type="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
@@ -167,15 +167,16 @@ export function AuthPage() {
               />
             </div>
             {error && (
-              <p id={errorId} role="alert" className="text-xs text-destructive">
+              <p id={errorId} role="alert" className="text-xs text-destructive text-center">
                 {error}
               </p>
             )}
             <Button
               type="submit"
+              variant="brand"
               disabled={mutation.isPending}
               aria-disabled={!canSubmit || mutation.isPending}
-              className={`w-full ${!canSubmit && !mutation.isPending ? "opacity-50" : ""}`}
+              className={`w-full mt-2 font-medium cursor-pointer ${!canSubmit && !mutation.isPending ? "opacity-50" : ""}`}
             >
               {mutation.isPending
                 ? "Working…"
@@ -185,11 +186,11 @@ export function AuthPage() {
             </Button>
           </form>
 
-          <div className="mt-5 text-sm text-muted-foreground">
+          <div className="mt-6 text-xs text-muted-foreground">
             {mode === "sign_in" ? "Need an account?" : "Already have an account?"}{" "}
             <button
               type="button"
-              className="font-medium text-foreground underline underline-offset-2"
+              className="font-medium text-foreground hover:underline underline-offset-2"
               onClick={() => {
                 setError(null);
                 setMode(mode === "sign_in" ? "sign_up" : "sign_in");
