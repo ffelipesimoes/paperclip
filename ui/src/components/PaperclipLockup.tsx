@@ -18,7 +18,7 @@ export function PaperclipLockup({
 }: PaperclipLockupProps) {
   return (
     <img
-      src="/w3du-logo.png"
+      src="/w3du-logo.png?v=2"
       alt={decorative ? "" : title}
       role={decorative ? "presentation" : "img"}
       className={cn("h-8 w-auto object-contain", className)}

@@ -87,9 +87,9 @@ export function AuthPage() {
       </div>
       {/* Left half — form */}
       <div className="w-full md:w-1/2 flex flex-col justify-center items-center overflow-y-auto px-4 py-12">
-        <div className="w-full max-w-sm rounded-2xl border border-border bg-card/60 p-8 shadow-xs backdrop-blur-xs text-center">
-          <div className="flex justify-center mb-6">
-            <PaperclipLockup className="h-8 w-auto object-contain" />
+        <div className="w-full max-w-sm rounded-2xl border border-border bg-card/60 px-8 pt-7 pb-8 shadow-xs backdrop-blur-xs text-center">
+          <div className="flex justify-center mb-4">
+            <PaperclipLockup className="h-10 w-auto object-contain" />
           </div>
 
           <h1 className="text-xl font-semibold tracking-tight text-foreground">
